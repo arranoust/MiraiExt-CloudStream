@@ -1,0 +1,46 @@
+[
+    {
+        "url": "https://raw.githubusercontent.com/arranoust/MiraiExt-CloudStream/builds/OtakudesuProvider.cs3",
+        "status": 1,
+        "version": 6,
+        "name": "OtakudesuProvider",
+        "internalName": "OtakudesuProvider",
+        "authors": [
+            "arranoust"
+        ],
+        "description": "Otakudesu - Nonton anime sub Indo terlengkap.",
+        "fileSize": 40327,
+        "repositoryUrl": "https://github.com/arranoust/MiraiExt-CloudStream",
+        "language": "id",
+        "tvTypes": [
+            "AnimeMovie",
+            "Anime",
+            "OVA"
+        ],
+        "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRr-sfek8gXmLpcAppEpaYbUDVtndQbCm_boh1-E91QrmSvsw-2l3-s2JOP&s=10",
+        "apiVersion": 1,
+        "fileHash": "sha256-d91801c1520136e01d349de5b064afe56c1771cba85c952cbcc03fd62a8c24fc"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/arranoust/MiraiExt-CloudStream/builds/SamehadakuProvider.cs3",
+        "status": 1,
+        "version": 16,
+        "name": "SamehadakuProvider",
+        "internalName": "SamehadakuProvider",
+        "authors": [
+            "arranoust"
+        ],
+        "description": "Samehadaku - Nonton anime sub Indo terbaru dengan kualitas video HD terlengkap.",
+        "fileSize": 37435,
+        "repositoryUrl": "https://github.com/arranoust/MiraiExt-CloudStream",
+        "language": "id",
+        "tvTypes": [
+            "AnimeMovie",
+            "Anime",
+            "OVA"
+        ],
+        "iconUrl": "https://v2.samehadaku.how/wp-content/uploads/2020/04/cropped-download-1-192x192.jpg",
+        "apiVersion": 1,
+        "fileHash": "sha256-fa23ee5eca3a7ee2a17ab60c8fc53dd298243b4e93cd02846c57d2f78caf45bb"
+    }
+]
