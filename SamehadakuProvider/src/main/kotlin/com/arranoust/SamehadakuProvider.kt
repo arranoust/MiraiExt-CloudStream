@@ -20,6 +20,7 @@ class SamehadakuProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
 
     companion object {
+        var context: android.content.Context? = null
         fun getType(t: String): TvType = when {
             t.contains("OVA", true) || t.contains("Special", true) -> TvType.OVA
             t.contains("Movie", true) -> TvType.AnimeMovie
@@ -39,6 +40,7 @@ class SamehadakuProvider : MainAPI() {
 
     // ================== Homepage ==================
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        context?.let { PopupHelper.showPopupIfNeeded(it) }
         val document = safeGet("$mainUrl/${request.data.format(page)}")
             ?: return newHomePageResponse(listOf(), false)
         val items = document.select("li[itemtype='http://schema.org/CreativeWork']")
