@@ -23,6 +23,7 @@ class SamehadakuProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
 
     companion object {
+        var context: Context? = null
         fun getType(t: String): TvType = when {
             t.contains("OVA", true) || t.contains("Special", true) -> TvType.OVA
             t.contains("Movie", true) -> TvType.AnimeMovie
