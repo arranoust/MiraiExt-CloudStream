@@ -13,7 +13,7 @@ object PopupHelper {
 
     private const val TAG = "PopupHelper"
     private const val PREFS_NAME = "MiraiExtPrefs"
-    private const val KEY_SHOWN_POPUP = "shown_welcome_v2"
+    private const val KEY_SHOWN_POPUP = "shown_welcome_v4"
     private const val GITHUB_URL = "https://github.com/arranoust/MiraiExt"
 
     fun showPopupIfNeeded(context: Context) {
