@@ -216,6 +216,18 @@ class SamehadakuProvider : MainAPI() {
     ): Boolean {
         val document = app.get(data).document
 
+        // Mirror stream 
+        document.selectFirst("div#player_embed iframe")?.attr("src")?.let { src ->
+            val videoUrl = fixUrl(src)
+            callback(
+                newExtractorLink("Wibufile", "Wibufile", videoUrl) {
+                    this.referer = mainUrl
+                    this.quality = Qualities.Unknown.value
+                }
+            )
+        }
+
+        // Download links
         document.select("div#downloadb li").amap { el ->
             el.select("a").amap {
                 loadFixedExtractor(
