@@ -6,7 +6,7 @@ cloudstream {
     language = "id"
     // All of these properties are optional, you can safely remove them
 
-     description = "Samehadaku adalah situs nonton anime sub Indo terbaru dengan kualitas video HD terlengkap, streaming anime online bahasa Indonesia gratis."
+     description = "Samehadaku - Nonton anime sub Indo terbaru dengan kualitas video HD terlengkap."
      authors = listOf("arranoust")
 
     /**
@@ -23,5 +23,5 @@ cloudstream {
         "OVA",
     )
 
-    iconUrl = "https://v1.samehadaku.how/wp-content/uploads/2020/04/cropped-download-1-192x192.jpg"
+    iconUrl = "https://v2.samehadaku.how/wp-content/uploads/2020/04/cropped-download-1-192x192.jpg"
 }
