@@ -13,5 +13,6 @@ class SamehadakuPlugin : Plugin() {
         // directly.
         SamehadakuProvider.context = context
         registerMainAPI(SamehadakuProvider())
+        registerExtractorAPI(BloggerExtractor())
     }
 }
