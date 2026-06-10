@@ -43,18 +43,23 @@ class SamehadakuProvider : MainAPI() {
 
     // ================== Homepage ==================
     override val mainPage = mainPageOf(
-        "anime-terbaru/page/%d/" to "Episode Terbaru",
-        "daftar-anime-2/?title=&status=Currently+Airing&type=&order=update" to "Ongoing Anime",
-        "daftar-anime-2/?title=&status=Finished+Airing&type=&order=latest" to "Completed Anime",
-        "daftar-anime-2/?title=&status=&type=Movie&order=latest" to "Movies",
+        "anime-terbaru/page/%d/" to "New Episodes",
+        "daftar-anime-2/page/%d/?status=Currently+Airing&order=latest" to "Ongoing Anime",
+        "daftar-anime-2/page/%d/?status=Finished+Airing&order=latest" to "Completed Anime",
+        "daftar-anime-2/page/%d/?type=Movie&order=latest" to "Movies",
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         context?.let { PopupHelper.showPopupIfNeeded(it) }
         val document = app.get("$mainUrl/${request.data.format(page)}").document
-        val homeList = document
-            .select("li[itemtype='http://schema.org/CreativeWork']")
-            .mapNotNull { it.toLatestAnimeResult() }
+
+        val homeList = if (request.data.contains("anime-terbaru")) {
+            document.select("li[itemtype='http://schema.org/CreativeWork']")
+                .mapNotNull { it.toLatestAnimeResult() }
+        } else {
+            document.select("div.animepost, div.animposx")
+                .mapNotNull { it.toSearchResult() }
+        }
 
         return newHomePageResponse(
             listOf(HomePageList(request.name, homeList, isHorizontalImages = true)),
@@ -63,8 +68,8 @@ class SamehadakuProvider : MainAPI() {
     }
 
     private fun Element.toSearchResult(): AnimeSearchResponse? {
-        val a         = selectFirst("a") ?: return null
-        val title     = selectFirst("div.title h2")?.text()?.trim()
+        val a         = selectFirst("div.animposx > a") ?: return null
+        val title     = selectFirst("div.data div.title h2")?.text()?.trim()
                     ?: a.attr("title").takeIf { it.isNotBlank() } ?: return null
         val href      = fixUrlNull(a.attr("href")) ?: return null
         val posterUrl = fixUrlNull(selectFirst("div.content-thumb img")?.attr("src"))
