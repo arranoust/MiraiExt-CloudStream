@@ -196,31 +196,33 @@ class SamehadakuProvider : MainAPI() {
         }
     }
 
-    // ================== Load Links ==================
-    override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        val document = app.get(data).document
-
-        document.select("div#downloadb li").forEach { el ->
-            val quality = el.select("strong").text()
-            el.select("a").forEach { anchor ->
-                val href = fixUrl(anchor.attr("href"))
-                loadExtractor(href, "$mainUrl/", subtitleCallback) { link ->
-                    callback(newExtractorLink(link.name, link.name, link.url, link.type) {
-                        this.referer       = link.referer
-                        this.quality       = quality.fixQuality()
-                        this.headers       = link.headers
-                        this.extractorData = link.extractorData
-                    })
-                }
+// ================== Load Links ==================
+override suspend fun loadLinks(
+    data: String,
+    isCasting: Boolean,
+    subtitleCallback: (SubtitleFile) -> Unit,
+    callback: (ExtractorLink) -> Unit
+): Boolean {
+    val document = app.get(data).document
+    val items = document.select("div#downloadb li").map { el ->
+        val quality = el.select("strong").text()
+        val hrefs = el.select("a").map { fixUrl(it.attr("href")) }
+        quality to hrefs
+    }
+    items.amap { (quality, hrefs) ->
+        hrefs.amap { href ->
+            loadExtractor(href, "$mainUrl/", subtitleCallback) { link ->
+                callback(newExtractorLink(link.name, link.name, link.url, link.type) {
+                    this.referer       = link.referer
+                    this.quality       = quality.fixQuality()
+                    this.headers       = link.headers
+                    this.extractorData = link.extractorData
+                })
             }
         }
-        return true
     }
+    return true
+}
 
     // ================== Utils ==================
     private fun String.fixQuality(): Int = when (uppercase()) {
