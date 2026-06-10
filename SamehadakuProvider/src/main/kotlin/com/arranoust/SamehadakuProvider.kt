@@ -11,6 +11,7 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import com.lagradost.cloudstream3.utils.*
 import org.json.JSONObject
 import org.jsoup.nodes.Element
+import kotlinx.coroutines.runBlocking
 
 class SamehadakuProvider : MainAPI() {
     override var mainUrl = "https://v2.samehadaku.how"
@@ -223,7 +224,7 @@ class SamehadakuProvider : MainAPI() {
     ) {
         loadExtractor(url, referer, subtitleCallback) { link ->
             runBlocking {
-                callback.invoke(
+                callback(
                     newExtractorLink(link.name, link.name, link.url, link.type) {
                         this.referer = link.referer
                         this.quality = name.fixQuality()
