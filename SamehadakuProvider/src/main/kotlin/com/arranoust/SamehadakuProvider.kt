@@ -225,7 +225,7 @@ class SamehadakuProvider : MainAPI() {
             // Direct video file (e.g. wibufile serves MP4 directly in iframe src)
             if (isDirectVideoUrl(iframeUrl)) {
                 callback(
-                    newExtractorLink("Stream", label, iframeUrl, ExtractorLinkType.VIDEO) {
+                    newExtractorLink(label, label, iframeUrl, ExtractorLinkType.VIDEO) {
                         this.referer = data
                         this.quality = label.fixQuality()
                     }
@@ -291,11 +291,16 @@ class SamehadakuProvider : MainAPI() {
             || lower.contains(".webm") || lower.contains(".m3u8")
     }
 
-    private fun String.fixQuality(): Int = when (uppercase()) {
-        "4K"     -> Qualities.P2160.value
-        "FULLHD" -> Qualities.P1080.value
-        "MP4HD"  -> Qualities.P720.value
-        else     -> filter { it.isDigit() }.toIntOrNull() ?: Qualities.Unknown.value
+    private fun String.fixQuality(): Int {
+        val upper = uppercase()
+        return when {
+            upper.contains("4K")     -> Qualities.P2160.value
+            upper.contains("FULLHD") -> Qualities.P1080.value
+            upper.contains("MP4HD")  -> Qualities.P720.value
+            else -> Regex("""(\d{3,4})[pP]?""").findAll(this)
+                        .lastOrNull()?.groupValues?.get(1)?.toIntOrNull()
+                    ?: Qualities.Unknown.value
+        }
     }
 
     private suspend fun fetchTmdbLogoUrl(type: TvType, tmdbId: Int?, langCode: String?): String? {
