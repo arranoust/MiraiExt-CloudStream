@@ -216,18 +216,22 @@ class SamehadakuProvider : MainAPI() {
 
     private suspend fun loadFixedExtractor(
         url: String,
-        quality: String,
+        name: String,
         referer: String? = null,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
         loadExtractor(url, referer, subtitleCallback) { link ->
-            callback(newExtractorLink(link.name, link.name, link.url, link.type) {
-                this.referer       = link.referer
-                this.quality       = quality.fixQuality()
-                this.headers       = link.headers
-                this.extractorData = link.extractorData
-            })
+            runBlocking {
+                callback.invoke(
+                    newExtractorLink(link.name, link.name, link.url, link.type) {
+                        this.referer = link.referer
+                        this.quality = name.fixQuality()
+                        this.headers = link.headers
+                        this.extractorData = link.extractorData
+                    }
+                )
+            }
         }
     }
 
