@@ -9,7 +9,6 @@ class SamehadakuPlugin : Plugin() {
     override fun load(context: Context) {
         SamehadakuProvider.context = context
         registerMainAPI(SamehadakuProvider())
-        registerExtractorAPI(WibufileExtractor())
         registerExtractorAPI(FiledonExtractor())
     }
 }

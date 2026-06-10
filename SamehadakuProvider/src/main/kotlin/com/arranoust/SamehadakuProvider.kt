@@ -44,6 +44,9 @@ class SamehadakuProvider : MainAPI() {
     // ================== Homepage ==================
     override val mainPage = mainPageOf(
         "anime-terbaru/page/%d/" to "Episode Terbaru",
+        "daftar-anime-2/?title=&status=Currently+Airing&type=&order=update" to "Ongoing Anime"
+        "daftar-anime-2/?title=&status=Finished+Airing&type=&order=latest" to "Completed Anime"
+        "daftar-anime-2/?title=&status=&type=Movie&order=latest" to "Movies"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
@@ -60,12 +63,12 @@ class SamehadakuProvider : MainAPI() {
     }
 
     private fun Element.toSearchResult(): AnimeSearchResponse? {
-        val a          = selectFirst("div.animepost a, div.animpost a") ?: return null
-        val title      = a.selectFirst("div.title h2, div.tt h4")?.text()?.trim()
-                      ?: a.attr("title").takeIf { it.isNotBlank() } ?: return null
-        val href       = fixUrlNull(a.attr("href")) ?: return null
-        val posterUrl  = fixUrlNull(selectFirst("div.content-thumb img, div.limit img")?.attr("src"))
-        val statusText = a.selectFirst("div.data > div.type, div.type")?.text()?.trim() ?: ""
+        val a         = selectFirst("a") ?: return null
+        val title     = selectFirst("div.title h2")?.text()?.trim()
+                    ?: a.attr("title").takeIf { it.isNotBlank() } ?: return null
+        val href      = fixUrlNull(a.attr("href")) ?: return null
+        val posterUrl = fixUrlNull(selectFirst("div.content-thumb img")?.attr("src"))
+        val statusText = selectFirst("div.data > div.type")?.text()?.trim() ?: ""
 
         return newAnimeSearchResponse(title, href, TvType.Anime) {
             this.posterUrl = posterUrl
@@ -90,7 +93,7 @@ class SamehadakuProvider : MainAPI() {
     // ================== Search ==================
     override suspend fun search(query: String): List<SearchResponse> {
         return app.get("$mainUrl/?s=$query").document
-            .select("div.animepost, article.animpost")
+            .select("div.animposx")
             .mapNotNull { it.toSearchResult() }
     }
 
@@ -213,7 +216,7 @@ class SamehadakuProvider : MainAPI() {
             }
         }
 
-        // --- Stream mirrors (VIP, Wibufile, Mega, etc.) ---
+        // --- Stream mirrors  ---
         document.select("div.east_player_option[data-post][data-nume]").amap { btn ->
             val postId = btn.attr("data-post").takeIf { it.isNotBlank() } ?: return@amap
             val nume   = btn.attr("data-nume").takeIf { it.isNotBlank() } ?: return@amap
@@ -222,7 +225,7 @@ class SamehadakuProvider : MainAPI() {
 
             val iframeUrl = fetchStreamIframe(postId, nume, type) ?: return@amap
 
-            // Direct video file (e.g. wibufile serves MP4 directly in iframe src)
+            // Direct video file 
             if (isDirectVideoUrl(iframeUrl)) {
                 callback(
                     newExtractorLink(label, label, iframeUrl, ExtractorLinkType.VIDEO) {
