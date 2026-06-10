@@ -8,7 +8,6 @@
 
 | Nama Ekstensi | Bahasa     | Status |
 |---------------|------------|--------|
-| AnimeSail     | Indonesia  | ❌ Nonaktif |
 | Samehadaku    | Indonesia  | ✅ Aktif |
 
 ---
