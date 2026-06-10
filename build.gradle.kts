@@ -41,10 +41,13 @@ subprojects {
 
     android {
         namespace = "com.arranoust"
+        compileSdk = 36  
 
         defaultConfig {
             minSdk = 21
-            compileSdkVersion(36)
+        }
+
+        lint {
             targetSdk = 36
         }
 
@@ -79,6 +82,6 @@ subprojects {
     }
 }
 
-task<Delete>("clean") {
+tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
 }
