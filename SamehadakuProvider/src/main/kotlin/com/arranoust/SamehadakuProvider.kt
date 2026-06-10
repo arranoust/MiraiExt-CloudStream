@@ -24,7 +24,6 @@ class SamehadakuProvider : MainAPI() {
     companion object {
         var context: android.content.Context? = null
 
-        // Cached singletons
         private val mapper = ObjectMapper()
         private val episodeNumRegex = Regex("Episode\\s?(\\d+)")
         private val yearRegex       = Regex("\\d, (\\d*)")
@@ -206,13 +205,62 @@ class SamehadakuProvider : MainAPI() {
     ): Boolean {
         val document = app.get(data).document
 
+        // --- Download mirrors ---
         document.select("div#downloadb li").amap { el ->
             val quality = el.select("strong").text()
             el.select("a").amap {
                 loadFixedExtractor(fixUrl(it.attr("href")), quality, "$mainUrl/", subtitleCallback, callback)
             }
         }
+
+        // --- Stream mirrors (VIP, Wibufile, Mega, etc.) ---
+        document.select("div.east_player_option[data-post][data-nume]").amap { btn ->
+            val postId = btn.attr("data-post").takeIf { it.isNotBlank() } ?: return@amap
+            val nume   = btn.attr("data-nume").takeIf { it.isNotBlank() } ?: return@amap
+            val type   = btn.attr("data-type").takeIf { it.isNotBlank() } ?: return@amap
+            val label  = btn.selectFirst("span")?.text()?.trim() ?: "Mirror $nume"
+
+            val iframeUrl = fetchStreamIframe(postId, nume, type) ?: return@amap
+
+            // Direct video file (e.g. wibufile serves MP4 directly in iframe src)
+            if (isDirectVideoUrl(iframeUrl)) {
+                callback(
+                    newExtractorLink("Stream", label, iframeUrl, ExtractorLinkType.VIDEO) {
+                        this.referer = data
+                        this.quality = label.fixQuality()
+                    }
+                )
+            } else {
+                loadFixedExtractor(iframeUrl, label, data, subtitleCallback, callback)
+            }
+        }
+
         return true
+    }
+
+    // POST to wp-admin/admin-ajax.php, extract iframe src from response
+    private suspend fun fetchStreamIframe(postId: String, nume: String, type: String): String? {
+        return runCatching {
+            val response = app.post(
+                "$mainUrl/wp-admin/admin-ajax.php",
+                data = mapOf(
+                    "action" to "player_ajax",
+                    "post"   to postId,
+                    "nume"   to nume,
+                    "type"   to type
+                ),
+                headers = mapOf(
+                    "X-Requested-With" to "XMLHttpRequest",
+                    "Referer"          to mainUrl
+                )
+            ).text
+
+            val embedContent = runCatching {
+                mapper.readTree(response)?.get("embed")?.asText()
+            }.getOrNull() ?: response
+
+            Regex("""src=["']([^"']+)["']""").find(embedContent)?.groupValues?.get(1)
+        }.getOrNull()
     }
 
     private suspend fun loadFixedExtractor(
@@ -237,6 +285,12 @@ class SamehadakuProvider : MainAPI() {
     }
 
     // ================== Utils ==================
+    private fun isDirectVideoUrl(url: String): Boolean {
+        val lower = url.lowercase()
+        return lower.contains(".mp4") || lower.contains(".mkv")
+            || lower.contains(".webm") || lower.contains(".m3u8")
+    }
+
     private fun String.fixQuality(): Int = when (uppercase()) {
         "4K"     -> Qualities.P2160.value
         "FULLHD" -> Qualities.P1080.value
