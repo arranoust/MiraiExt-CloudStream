@@ -11,6 +11,7 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import com.lagradost.cloudstream3.utils.*
 import org.json.JSONObject
 import org.jsoup.nodes.Element
+import java.lang.ref.WeakReference
 
 class SamehadakuProvider : MainAPI() {
     override var mainUrl = "https://v2.samehadaku.how"
@@ -21,7 +22,7 @@ class SamehadakuProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
 
     companion object {
-        var context: android.content.Context? = null
+        var context: WeakReference<android.content.Context>? = null
 
         // Cached singletons
         private val mapper = ObjectMapper()
@@ -47,7 +48,7 @@ class SamehadakuProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        context?.let { PopupHelper.showPopupIfNeeded(it) }
+        context?.get()?.let { PopupHelper.showPopupIfNeeded(it) }
         val document = app.get("$mainUrl/${request.data.format(page)}").document
         val homeList = document
             .select("li[itemtype='http://schema.org/CreativeWork']")
@@ -207,8 +208,9 @@ class SamehadakuProvider : MainAPI() {
 
         document.select("div#downloadb li").amap { el ->
             val quality = el.select("strong").text()
-            el.select("a").amap {
-                loadExtractor(fixUrl(it.attr("href")), "$mainUrl/", subtitleCallback) { link ->
+            val links = el.select("a").map { fixUrl(it.attr("href")) }
+            links.amap { href ->
+                loadExtractor(href, "$mainUrl/", subtitleCallback) { link ->
                     callback(newExtractorLink(link.name, link.name, link.url, link.type) {
                         this.referer       = link.referer
                         this.quality       = quality.fixQuality()
