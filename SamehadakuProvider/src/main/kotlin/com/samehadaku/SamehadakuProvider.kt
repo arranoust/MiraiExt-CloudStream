@@ -1,4 +1,4 @@
-package com.arranoust
+package com.samehadaku
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
@@ -233,7 +233,7 @@ class SamehadakuProvider : MainAPI() {
             val iframeUrl = fetchStreamIframe(postId, nume, type) ?: return@amap
 
             // Direct video file 
-            if (isDirectVideoUrl(iframeUrl)) {
+            if (isDirectVideoUrl(iframeUrl) || iframeUrl.contains("wibufile.com", ignoreCase = true)) {
                 callback(
                     newExtractorLink(label, label, iframeUrl, ExtractorLinkType.VIDEO) {
                         this.referer = data
@@ -299,7 +299,6 @@ class SamehadakuProvider : MainAPI() {
         val lower = url.lowercase()
         return lower.contains(".mp4") || lower.contains(".mkv")
             || lower.contains(".webm") || lower.contains(".m3u8")
-            || lower.contains("s0.wibufile.com")
     }
 
     private fun String.fixQuality(): Int {

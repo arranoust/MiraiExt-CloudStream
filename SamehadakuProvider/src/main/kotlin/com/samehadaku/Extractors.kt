@@ -1,4 +1,4 @@
-package com.arranoust
+package com.samehadaku
 
 import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.app
