@@ -9,9 +9,8 @@ class OtakudesuPlugin : Plugin() {
     override fun load(context: Context) {
         registerMainAPI(OtakudesuProvider())
         registerExtractorAPI(OdstreamExtractor())
+        registerExtractorAPI(FiledonExtractor())
         registerExtractorAPI(OndesuExtractor())
         registerExtractorAPI(OndesuhExtractor())
-        registerExtractorAPI(FiledonExtractor())
-        registerExtractorAPI(VidhideExtractor())
     }
 }
