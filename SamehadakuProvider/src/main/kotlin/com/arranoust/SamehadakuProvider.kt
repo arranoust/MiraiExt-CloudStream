@@ -54,21 +54,23 @@ class SamehadakuProvider : MainAPI() {
         val document = app.get("$mainUrl/${request.data.format(page)}").document
 
         val homeList = if (request.data.contains("anime-terbaru")) {
-            document.select("li[itemtype='http://schema.org/CreativeWork']")
-                .mapNotNull { it.toLatestAnimeResult() }
-        } else {
-            document.select("div.animepost, div.animposx")
-                .mapNotNull { it.toSearchResult() }
-        }
+        document.select("li[itemtype='http://schema.org/CreativeWork']")
+            .mapNotNull { it.toLatestAnimeResult() }
+    } else {
+        document.select("div.animposx")  
+            .mapNotNull { it.toSearchResult() }
+    }
+
+        val isHorizontal = request.data.contains("anime-terbaru")
 
         return newHomePageResponse(
-            listOf(HomePageList(request.name, homeList, isHorizontalImages = true)),
+            listOf(HomePageList(request.name, homeList, isHorizontalImages = isHorizontal)),
             hasNext = homeList.isNotEmpty()
         )
     }
 
     private fun Element.toSearchResult(): AnimeSearchResponse? {
-        val a         = selectFirst("div.animposx > a") ?: return null
+        val a         = selectFirst("a") ?: return null
         val title     = selectFirst("div.data div.title h2")?.text()?.trim()
                     ?: a.attr("title").takeIf { it.isNotBlank() } ?: return null
         val href      = fixUrlNull(a.attr("href")) ?: return null
@@ -283,7 +285,7 @@ class SamehadakuProvider : MainAPI() {
                 callback(
                     newExtractorLink(link.name, link.name, link.url, link.type) {
                         this.referer = link.referer
-                        this.quality = name.fixQuality()
+                        this.quality = link.quality.takeIf { it != Qualities.Unknown.value } ?: name.fixQuality()
                         this.headers = link.headers
                         this.extractorData = link.extractorData
                     }
