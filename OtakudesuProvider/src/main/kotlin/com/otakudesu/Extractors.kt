@@ -77,9 +77,37 @@ class OndesuExtractor : ExtractorApi() {
 
 // ── OndesuhExtractor ─────────────────────────────────────────────────────────
 // Alternate Ondesu domain
-class OndesuhExtractor : OndesuExtractor() {
-    override val name    = "Ondesuh"
-    override val mainUrl = "https://ondesuh.cc"
+class OndesuhExtractor : ExtractorApi() {
+    override val name            = "Ondesuh"
+    override val mainUrl         = "https://ondesuh.cc"
+    override val requiresReferer = true
+
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val body = app.get(
+            url,
+            headers = mapOf("User-Agent" to UA, "Referer" to (referer ?: mainUrl))
+        ).text
+
+        val bloggerUrl = Regex("""<iframe[^>]+src=["']([^"']*blogger\.com/video[^"']*)["']""", RegexOption.IGNORE_CASE)
+            .find(body)?.groupValues?.get(1) ?: return
+
+        val bBody    = app.get(bloggerUrl, headers = mapOf("User-Agent" to UA)).text
+        val videoUrl = Regex(""""play_url"\s*:\s*"([^"]+)"""").find(bBody)?.groupValues?.get(1)
+            ?: Regex(""""iurl"\s*:\s*"([^"]+)"""").find(bBody)?.groupValues?.get(1)
+            ?: return
+
+        callback(
+            newExtractorLink(name, name, videoUrl.unescapeUnicode(), detectLinkType(videoUrl)) {
+                this.referer = "https://www.blogger.com/"
+                this.quality = parseQuality(url, referer ?: "")
+            }
+        )
+    }
 }
 
 // ── Filedon ───────────────────────────────────────────────────────────────────
@@ -180,5 +208,20 @@ internal fun String.unescapeUnicode(): String = replace("\\u003d", "=")
 /** Best-effort p,a,c,k,e,d unpacker — returns null if not packed */
 internal fun tryUnpack(source: String): String? {
     if (!source.contains("eval(function(p,a,c,k,e")) return null
-    return runCatching { getAndUnpack(source) }.getOrNull()
+    return runCatching {
+        val packedRegex = Regex("""eval\(function\(p,a,c,k,e[^)]*\)\{.*?\}\('(.*?)',(\d+),(\d+),'(.*?)'""", RegexOption.DOT_MATCHES_ALL)
+        val match = packedRegex.find(source) ?: return null
+        val payload = match.groupValues[1]
+        val radix   = match.groupValues[2].toIntOrNull() ?: 36
+        val words   = match.groupValues[4].split("|")
+
+        var result = payload
+        words.forEachIndexed { i, word ->
+            if (word.isNotEmpty()) {
+                val key = i.toString(radix)
+                result = result.replace(Regex("""\b${Regex.escape(key)}\b"""), word)
+            }
+        }
+        result
+    }.getOrNull()
 }
