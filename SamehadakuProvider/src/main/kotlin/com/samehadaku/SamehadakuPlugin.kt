@@ -14,8 +14,8 @@ class SamehadakuPlugin : Plugin() {
         registerExtractorAPI(FiledonExtractor())
 
         openSettings = {
-            val frag = SettingsFragment(this, sharedPref)
-            frag.show(it.supportFragmentManager, frag.tag)
+            val frag = SettingsFragment(sharedPref)
+            frag.show(it.supportFragmentManager, "SamehadakuSettings")
         }
     }
 }
