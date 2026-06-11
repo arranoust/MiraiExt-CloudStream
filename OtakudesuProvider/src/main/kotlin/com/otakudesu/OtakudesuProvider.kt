@@ -37,25 +37,32 @@ class OtakudesuProvider : MainAPI() {
     }
 
     override val mainPage = mainPageOf(
-        "ongoing-anime/page/%d/"  to "Ongoing Anime",
-        "complete-anime/page/%d/" to "Completed Anime",
+        "$mainUrl/complete-anime/page/" to "Complete Anime", 
+        "$mainUrl/ongoing-anime/page/"  to "Ongoing Anime",
+        "$mainUrl/complete-anime/page/" to "Completed Anime",
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get("$mainUrl/${request.data.format(page)}").document
-        val items    = document.select(".venz li .detpost").mapNotNull { it.toSearchResult() }
+        val document  = app.get(request.data + page).document
+        val isBanner  = request.name == "Complete Anime"
+        val items     = document.select("div.venz > ul > li").mapNotNull { it.toSearchResult() }
+
         return newHomePageResponse(
-            listOf(HomePageList(request.name, items, isHorizontalImages = false)),
+            listOf(HomePageList(request.name, items, isHorizontalImages = isBanner)),
             hasNext = items.isNotEmpty()
         )
     }
 
     private fun Element.toSearchResult(): AnimeSearchResponse? {
-        val a         = selectFirst(".thumb a") ?: return null
-        val href      = fixUrlNull(a.attr("href")) ?: return null
         val title     = selectFirst("h2.jdlflm")?.text()?.trim() ?: return null
-        val posterUrl = fixUrlNull(selectFirst(".thumbz img")?.attr("src"))
-        return newAnimeSearchResponse(title, href, TvType.Anime) { this.posterUrl = posterUrl }
+        val href      = selectFirst("a")?.attr("href") ?: return null
+        val posterUrl = select("div.thumbz > img").attr("src").takeIf { it.isNotBlank() }
+        val epNum     = selectFirst("div.epz")?.ownText()?.replace(Regex("\\D"), "")?.trim()?.toIntOrNull()
+
+        return newAnimeSearchResponse(title, href, TvType.Anime) {
+            this.posterUrl = posterUrl
+            addSub(epNum)
+        }
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
@@ -74,77 +81,93 @@ class OtakudesuProvider : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
-        val infoMap = mutableMapOf<String, String>()
-        document.select(".infozingle p span").forEach { span ->
-            val text  = span.text()
-            val colon = text.indexOf(':')
-            if (colon == -1) return@forEach
-            val label = text.substring(0, colon).trim().lowercase()
-            val value = text.substring(colon + 1).trim()
-            if (label.isNotBlank() && value.isNotBlank()) infoMap[label] = value
-        }
+        val title = document.selectFirst("div.infozingle > p:nth-child(1) > span")
+            ?.ownText()?.replace(":", "")?.trim() ?: return null
 
-        val rawTitle = document.selectFirst("h1.entry-title")?.text() ?: return null
-        val title    = infoMap["judul"]?.trim() ?: rawTitle.trim()
-        val engTitle = infoMap["english"]?.trim() ?: infoMap["judul inggris"]?.trim()
-        val japTitle = infoMap["japanese"]?.trim() ?: infoMap["judul jepang"]?.trim()
+        val poster   = document.selectFirst("div.fotoanime > img")?.attr("src")
+        val synopsis = document.select("div.sinopc > p").text().trim()
+        val tags     = document.select("div.infozingle > p:nth-child(11) > span > a").map { it.text() }
 
-        val poster   = document.selectFirst(".fotoanime img")?.attr("src")
-        val synopsis = document.select(".sinopc p").text().trim()
-        val tags     = document.select(".infozingle p:contains(Genre) a").map { it.text() }
-        val typeStr  = infoMap["type"] ?: ""
+        val typeStr  = document.selectFirst("div.infozingle > p:nth-child(5) > span")
+            ?.ownText()?.replace(":", "")?.trim() ?: "tv"
         val type     = getType(typeStr)
-        val year     = yearRegex.find(infoMap["tanggal rilis"] ?: infoMap["rilis"] ?: "")
-                           ?.value?.toIntOrNull()
-        val trailer  = document.selectFirst("div.trailer-anime iframe, #trailer iframe")?.attr("src")
 
-        val tracker = APIHolder.getTracker(
-            listOfNotNull(engTitle, title, japTitle).filter { it.isNotBlank() },
-            TrackerType.getTypes(type), year, true
-        )
-        val malId = tracker?.malId
+        val statusStr = document.selectFirst("div.infozingle > p:nth-child(6) > span")
+            ?.ownText()?.replace(":", "")?.trim() ?: ""
 
-        var aniZip: AniZipData? = null
+        val year = yearRegex.find(
+            document.select("div.infozingle > p:nth-child(9) > span").text()
+        )?.value?.toIntOrNull()
+
+        val trailer = document.selectFirst("div.trailer-anime iframe, #trailer iframe")?.attr("src")
+
+        val tracker = APIHolder.getTracker(listOf(title), TrackerType.getTypes(type), year, true)
+        val malId   = tracker?.malId
+
+        var aniZip:  AniZipData? = null
+        var tmdbId:  Int?        = null
+        var kitsuId: String?     = null
+
         if (malId != null) {
             runCatching {
                 val json = app.get("https://api.ani.zip/mappings?mal_id=$malId").text
                 aniZip   = mapper.readValue(json, AniZipData::class.java)
+                val tree = mapper.readTree(json)
+                tmdbId   = tree?.get("mappings")?.get("themoviedb_id")?.asInt()?.takeIf { it != 0 }
+                kitsuId  = tree?.get("mappings")?.get("kitsu_id")?.asText()?.takeIf { it.isNotBlank() }
             }
         }
 
-        val episodes = document.select(".episodelist ul li").amap { el ->
-            val a    = el.selectFirst("span.eps a") ?: return@amap null
-            val href = fixUrl(a.attr("href"))
-            val name = a.text().trim()
+        val logoUrl          = fetchTmdbLogoUrl(type, tmdbId, "en")
+        val backgroundPoster = aniZip?.images?.find { it.coverType == "Fanart" }?.url ?: tracker?.cover
 
-            var epNum = episodeNumRegex.find(name)?.groupValues?.get(1)?.toIntOrNull()
-            if (type == TvType.AnimeMovie && epNum == null) epNum = 1
+        val episodes = document.select("div.episodelist").getOrNull(1)
+            ?.select("ul > li")
+            ?.amap { el ->
+                val a    = el.selectFirst("a") ?: return@amap null
+                val href = fixUrl(a.attr("href"))
+                val name = a.text().trim()
 
-            val aniEp = epNum?.let { aniZip?.episodes?.get(it.toString()) }
+                var epNum = episodeNumRegex.find(name)?.groupValues?.get(1)?.toIntOrNull()
+                if (type == TvType.AnimeMovie && epNum == null) epNum = 1
 
-            newEpisode(href) {
-                this.name        = aniEp?.title?.get("en") ?: aniEp?.title?.get("ja") ?: name
-                this.episode     = epNum
-                this.posterUrl   = aniEp?.image ?: aniZip?.images?.firstOrNull()?.url ?: ""
-                this.description = aniEp?.overview?.takeIf { it.isNotBlank() } ?: "Synopsis not yet available."
-                this.runTime     = aniEp?.runtime
-                this.addDate(aniEp?.airDateUtc)
+                val aniEp = epNum?.let { aniZip?.episodes?.get(it.toString()) }
+
+                newEpisode(href) {
+                    this.name        = aniEp?.title?.get("en") ?: aniEp?.title?.get("ja") ?: name
+                    this.episode     = epNum
+                    this.posterUrl   = aniEp?.image ?: aniZip?.images?.firstOrNull()?.url ?: ""
+                    this.description = aniEp?.overview?.takeIf { it.isNotBlank() } ?: "Synopsis not yet available."
+                    this.runTime     = aniEp?.runtime
+                    this.addDate(aniEp?.airDateUtc)
+                }
+            }?.filterNotNull()?.reversed() ?: emptyList()
+
+        val recommendations = document.select("div.isi-recommend-anime-series > div.isi-konten")
+            .mapNotNull { el ->
+                val a      = el.selectFirst("a") ?: return@mapNotNull null
+                val href   = fixUrlNull(a.attr("href")) ?: return@mapNotNull null
+                val rTitle = el.selectFirst("span.judul-anime > a")?.text() ?: return@mapNotNull null
+                val rPoster = fixUrlNull(el.selectFirst("a > img")?.attr("src"))
+                newAnimeSearchResponse(rTitle, href, TvType.Anime) { this.posterUrl = rPoster }
             }
-        }.filterNotNull().reversed()
 
         return newAnimeLoadResponse(title, url, type) {
-            this.engName             = engTitle ?: aniZip?.titles?.get("en") ?: title
-            this.japName             = japTitle ?: aniZip?.titles?.get("ja")
+            this.engName             = aniZip?.titles?.get("en") ?: title
+            this.japName             = aniZip?.titles?.get("ja")
             this.posterUrl           = tracker?.image ?: poster
-            this.backgroundPosterUrl = tracker?.cover
+            this.backgroundPosterUrl = backgroundPoster
+            runCatching { this.logoUrl = logoUrl }
             this.year                = year
             addEpisodes(DubStatus.Subbed, episodes)
-            this.showStatus = getStatus(infoMap["status"] ?: "")
-            this.plot       = aniZip?.description?.replace(Regex("<.*?>"), "") ?: synopsis
-            this.tags       = tags
+            this.showStatus          = getStatus(statusStr)
+            this.plot                = aniZip?.description?.replace(Regex("<.*?>"), "") ?: synopsis
+            this.tags                = tags
+            this.recommendations     = recommendations
             addTrailer(trailer)
             addMalId(malId)
             addAniListId(tracker?.aniId?.toIntOrNull())
+            runCatching { addKitsuId(kitsuId) }
         }
     }
 
