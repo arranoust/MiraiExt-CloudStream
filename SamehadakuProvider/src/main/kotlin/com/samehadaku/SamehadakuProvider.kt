@@ -13,7 +13,7 @@ import org.json.JSONObject
 import org.jsoup.nodes.Element
 import kotlinx.coroutines.runBlocking
 
-class SamehadakuProvider : MainAPI() {
+class SamehadakuProvider(private val sharedPref: android.content.SharedPreferences? = null) : MainAPI() {
     override var mainUrl = "https://v2.samehadaku.how"
     override var name = "Samehadaku"
     override val hasMainPage = true
@@ -213,17 +213,25 @@ class SamehadakuProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
+        val prefQuality = sharedPref?.getString(SettingsFragment.PREF_QUALITY, "-1") ?: "-1"
+        val prefMirror  = sharedPref?.getString(SettingsFragment.PREF_MIRROR,  "")  ?: ""
+
+        val filteredCallback: (ExtractorLink) -> Unit = { link ->
+            val mirrorMatch = prefMirror.isBlank() ||
+                link.name.contains(prefMirror, ignoreCase = true) ||
+                link.url.contains(prefMirror,  ignoreCase = true)
+            if (mirrorMatch) callback(link)
+        }
+
         val document = app.get(data).document
 
-        // --- Download mirrors ---
         document.select("div#downloadb li").amap { el ->
             val quality = el.select("strong").text()
             el.select("a").amap {
-                loadFixedExtractor(fixUrl(it.attr("href")), quality, "$mainUrl/", subtitleCallback, callback)
+                loadFixedExtractor(fixUrl(it.attr("href")), quality, "$mainUrl/", subtitleCallback, filteredCallback)
             }
         }
 
-        // --- Stream mirrors  ---
         document.select("div.east_player_option[data-post][data-nume]").amap { btn ->
             val postId = btn.attr("data-post").takeIf { it.isNotBlank() } ?: return@amap
             val nume   = btn.attr("data-nume").takeIf { it.isNotBlank() } ?: return@amap
@@ -232,16 +240,17 @@ class SamehadakuProvider : MainAPI() {
 
             val iframeUrl = fetchStreamIframe(postId, nume, type) ?: return@amap
 
-            // Direct video file 
             if (isDirectVideoUrl(iframeUrl) || iframeUrl.contains("wibufile.com", ignoreCase = true)) {
-                callback(
-                    newExtractorLink(label, label, iframeUrl, ExtractorLinkType.VIDEO) {
-                        this.referer = data
-                        this.quality = label.fixQuality()
-                    }
-                )
+                val link = newExtractorLink(label, label, iframeUrl, ExtractorLinkType.VIDEO) {
+                    this.referer = data
+                    this.quality = label.fixQuality()
+                }
+                val mirrorMatch = prefMirror.isBlank() ||
+                    label.contains(prefMirror, ignoreCase = true) ||
+                    iframeUrl.contains(prefMirror, ignoreCase = true)
+                if (mirrorMatch) callback(link)
             } else {
-                loadFixedExtractor(iframeUrl, label, data, subtitleCallback, callback)
+                loadFixedExtractor(iframeUrl, label, data, subtitleCallback, filteredCallback)
             }
         }
 
