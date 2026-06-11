@@ -9,8 +9,6 @@ import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import org.json.JSONObject
 
-// ── Odstream ──────────────────────────────────────────────────────────────────
-// Fetches embed page → unpacks JS eval → extracts .m3u8 / .mp4
 class OdstreamExtractor : ExtractorApi() {
     override val name            = "Odstream"
     override val mainUrl         = "https://odstream.xyz"
@@ -22,11 +20,7 @@ class OdstreamExtractor : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        val body = app.get(
-            url,
-            headers = mapOf("User-Agent" to UA, "Referer" to (referer ?: "$mainUrl/"))
-        ).text
-
+        val body     = app.get(url, headers = mapOf("User-Agent" to UA, "Referer" to (referer ?: "$mainUrl/"))).text
         val src      = tryUnpack(body) ?: body
         val videoUrl = VIDEO_PATTERNS.firstNotNullOfOrNull { it.find(src)?.groupValues?.get(1) }
             ?.takeIf { it.isNotBlank() } ?: return
@@ -40,8 +34,6 @@ class OdstreamExtractor : ExtractorApi() {
     }
 }
 
-// ── Ondesu ────────────────────────────────────────────────────────────────────
-// Proxy → wraps a Blogger/googlevideo embed
 class OndesuExtractor : ExtractorApi() {
     override val name            = "Ondesu"
     override val mainUrl         = "https://ondesu.cc"
@@ -53,21 +45,9 @@ class OndesuExtractor : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        val body = app.get(
-            url,
-            headers = mapOf("User-Agent" to UA, "Referer" to (referer ?: mainUrl))
-        ).text
-
-        val bloggerUrl = Regex("""<iframe[^>]+src=["']([^"']*blogger\.com/video[^"']*)["']""", RegexOption.IGNORE_CASE)
-            .find(body)?.groupValues?.get(1) ?: return
-
-        val bBody    = app.get(bloggerUrl, headers = mapOf("User-Agent" to UA)).text
-        val videoUrl = Regex(""""play_url"\s*:\s*"([^"]+)"""").find(bBody)?.groupValues?.get(1)
-            ?: Regex(""""iurl"\s*:\s*"([^"]+)"""").find(bBody)?.groupValues?.get(1)
-            ?: return
-
+        val videoUrl = fetchBloggerVideoUrl(url, referer ?: mainUrl) ?: return
         callback(
-            newExtractorLink(name, name, videoUrl.unescapeUnicode(), detectLinkType(videoUrl)) {
+            newExtractorLink(name, name, videoUrl, detectLinkType(videoUrl)) {
                 this.referer = "https://www.blogger.com/"
                 this.quality = parseQuality(url, referer ?: "")
             }
@@ -75,8 +55,7 @@ class OndesuExtractor : ExtractorApi() {
     }
 }
 
-// ── OndesuhExtractor ─────────────────────────────────────────────────────────
-// Alternate Ondesu domain
+// Alternate Ondesu domain — duplicates logic to avoid extending a final class
 class OndesuhExtractor : ExtractorApi() {
     override val name            = "Ondesuh"
     override val mainUrl         = "https://ondesuh.cc"
@@ -88,21 +67,9 @@ class OndesuhExtractor : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        val body = app.get(
-            url,
-            headers = mapOf("User-Agent" to UA, "Referer" to (referer ?: mainUrl))
-        ).text
-
-        val bloggerUrl = Regex("""<iframe[^>]+src=["']([^"']*blogger\.com/video[^"']*)["']""", RegexOption.IGNORE_CASE)
-            .find(body)?.groupValues?.get(1) ?: return
-
-        val bBody    = app.get(bloggerUrl, headers = mapOf("User-Agent" to UA)).text
-        val videoUrl = Regex(""""play_url"\s*:\s*"([^"]+)"""").find(bBody)?.groupValues?.get(1)
-            ?: Regex(""""iurl"\s*:\s*"([^"]+)"""").find(bBody)?.groupValues?.get(1)
-            ?: return
-
+        val videoUrl = fetchBloggerVideoUrl(url, referer ?: mainUrl) ?: return
         callback(
-            newExtractorLink(name, name, videoUrl.unescapeUnicode(), detectLinkType(videoUrl)) {
+            newExtractorLink(name, name, videoUrl, detectLinkType(videoUrl)) {
                 this.referer = "https://www.blogger.com/"
                 this.quality = parseQuality(url, referer ?: "")
             }
@@ -110,8 +77,6 @@ class OndesuhExtractor : ExtractorApi() {
     }
 }
 
-// ── Filedon ───────────────────────────────────────────────────────────────────
-// data-page JSON → props.url
 class FiledonExtractor : ExtractorApi() {
     override val name            = "Filedon"
     override val mainUrl         = "https://filedon.co"
@@ -123,11 +88,7 @@ class FiledonExtractor : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        val body = app.get(
-            url,
-            headers = mapOf("User-Agent" to UA, "Referer" to (referer ?: "$mainUrl/"))
-        ).text
-
+        val body     = app.get(url, headers = mapOf("User-Agent" to UA, "Referer" to (referer ?: "$mainUrl/"))).text
         val raw      = Regex("""data-page="([^"]+)"""").find(body)?.groupValues?.get(1) ?: return
         val videoUrl = runCatching {
             JSONObject(raw.unescapeHtml()).getJSONObject("props").getString("url")
@@ -142,8 +103,6 @@ class FiledonExtractor : ExtractorApi() {
     }
 }
 
-// ── Vidhide ───────────────────────────────────────────────────────────────────
-// JS-packed page → extract sources array
 class VidhideExtractor : ExtractorApi() {
     override val name            = "Vidhide"
     override val mainUrl         = "https://vidhide.com"
@@ -170,7 +129,7 @@ class VidhideExtractor : ExtractorApi() {
     }
 }
 
-// ── Shared Utilities ──────────────────────────────────────────────────────────
+// ── Shared helpers ────────────────────────────────────────────────────────────
 
 internal const val UA =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -199,27 +158,48 @@ internal fun parseQuality(vararg sources: String): Int {
     return Qualities.Unknown.value
 }
 
-internal fun String.unescapeHtml(): String = replace("&quot;", "\"").replace("&amp;", "&")
-    .replace("&#039;", "'").replace("&lt;", "<").replace("&gt;", ">")
+internal fun String.unescapeHtml(): String =
+    replace("&quot;", "\"").replace("&amp;", "&")
+        .replace("&#039;", "'").replace("&lt;", "<").replace("&gt;", ">")
 
-internal fun String.unescapeUnicode(): String = replace("\\u003d", "=")
-    .replace("\\u0026", "&").replace("\\/", "/")
+internal fun String.unescapeUnicode(): String =
+    replace("\\u003d", "=").replace("\\u0026", "&").replace("\\/", "/")
 
-/** Best-effort p,a,c,k,e,d unpacker — returns null if not packed */
+// Shared Blogger embed fetcher used by Ondesu + Ondesuh
+private suspend fun fetchBloggerVideoUrl(url: String, referer: String): String? {
+    val body = app.get(url, headers = mapOf("User-Agent" to UA, "Referer" to referer)).text
+    val bloggerUrl = Regex(
+        """<iframe[^>]+src=["']([^"']*blogger\.com/video[^"']*)["']""",
+        RegexOption.IGNORE_CASE
+    ).find(body)?.groupValues?.get(1) ?: return null
+
+    val bBody = app.get(bloggerUrl, headers = mapOf("User-Agent" to UA)).text
+    return (Regex(""""play_url"\s*:\s*"([^"]+)"""").find(bBody)
+        ?: Regex(""""iurl"\s*:\s*"([^"]+)"""").find(bBody))
+        ?.groupValues?.get(1)?.unescapeUnicode()
+}
+
+// Best-effort p,a,c,k,e,d unpacker
 internal fun tryUnpack(source: String): String? {
     if (!source.contains("eval(function(p,a,c,k,e")) return null
     return runCatching {
-        val packedRegex = Regex("""eval\(function\(p,a,c,k,e[^)]*\)\{.*?\}\('(.*?)',(\d+),(\d+),'(.*?)'""", RegexOption.DOT_MATCHES_ALL)
-        val match = packedRegex.find(source) ?: return null
-        val payload = match.groupValues[1]
-        val radix   = match.groupValues[2].toIntOrNull() ?: 36
-        val words   = match.groupValues[4].split("|")
+        val match = Regex(
+            """eval\(function\(p,a,c,k,e[^)]*\)\{.*?'\|([^']+)'""",
+            RegexOption.DOT_MATCHES_ALL
+        ).find(source) ?: return null
+
+        val payload = Regex("""'([^']+)',\d+,\d+,'""").find(source)
+            ?.groupValues?.get(1) ?: return null
+        val words   = match.groupValues[1].split("|")
+        val radix   = Regex(""",(\d+),\d+,'""").find(source)
+            ?.groupValues?.get(1)?.toIntOrNull() ?: 36
 
         var result = payload
         words.forEachIndexed { i, word ->
             if (word.isNotEmpty()) {
-                val key = i.toString(radix)
-                result = result.replace(Regex("""\b${Regex.escape(key)}\b"""), word)
+                result = result.replace(
+                    Regex("""\b${Regex.escape(i.toString(radix))}\b"""), word
+                )
             }
         }
         result
