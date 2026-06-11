@@ -57,7 +57,9 @@ class FiledonExtractor : ExtractorApi() {
         callback(
             newExtractorLink(name, name, videoUrl, ExtractorLinkType.VIDEO) {
                 this.referer = "$mainUrl/"
-                this.quality = Qualities.Unknown.value
+                this.quality = Regex("""(\d{3,4})[pP]""").find(videoUrl)
+                    ?.groupValues?.get(1)?.toIntOrNull()
+                    ?: Qualities.Unknown.value
             }
         )
     }

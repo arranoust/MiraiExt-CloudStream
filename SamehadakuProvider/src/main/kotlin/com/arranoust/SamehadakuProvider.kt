@@ -299,6 +299,7 @@ class SamehadakuProvider : MainAPI() {
         val lower = url.lowercase()
         return lower.contains(".mp4") || lower.contains(".mkv")
             || lower.contains(".webm") || lower.contains(".m3u8")
+            || lower.contains("s0.wibufile.com")
     }
 
     private fun String.fixQuality(): Int {
