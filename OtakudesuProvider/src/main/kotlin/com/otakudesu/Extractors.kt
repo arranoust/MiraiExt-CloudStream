@@ -14,7 +14,7 @@ internal const val UA =
 
 private val HTML_HEADERS = mapOf(
     "User-Agent" to UA,
-    "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept"     to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 )
 
 // ── Shared utils ──────────────────────────────────────────────────────────────
@@ -44,10 +44,32 @@ internal fun parseQuality(vararg sources: String): Int {
     return Qualities.Unknown.value
 }
 
-/** Best-effort p,a,c,k,e,d unpacker */
+/**
+ * Dean Edwards p,a,c,k,e,d unpacker.
+ * Extracts the packed string from eval(function(p,a,c,k,e,...){...}('...')) and decodes it.
+ */
+internal fun unpackJs(source: String): String? {
+    // Extract the arguments passed to the packed function: ('payload',radix,count,'keys',...)
+    val match = Regex(
+        """}\s*\(\s*'((?:[^'\\]|\\.)*)',\s*(\d+),\s*(\d+),\s*'((?:[^'\\]|\\.)*)'\s*\.split"""
+    ).find(source) ?: return null
+
+    val payload = match.groupValues[1].replace("\\'", "'")
+    val radix   = match.groupValues[2].toIntOrNull() ?: return null
+    val keys    = match.groupValues[4].split("|")
+
+    fun decode(word: String): String {
+        if (word.isEmpty()) return word
+        val index = word.toLongOrNull(radix)?.toInt() ?: return word
+        return keys.getOrElse(index) { word }.ifEmpty { word }
+    }
+
+    return Regex("""\b(\w+)\b""").replace(payload) { decode(it.groupValues[1]) }
+}
+
 internal fun tryUnpack(source: String): String? {
     if (!source.contains("eval(function(p,a,c,k,e")) return null
-    return runCatching { getAndUnpack(source) }.getOrNull()
+    return runCatching { unpackJs(source) }.getOrNull()
 }
 
 // ── OdstreamExtractor (resolveWithUnpack) ─────────────────────────────────────
@@ -69,14 +91,15 @@ class OdstreamExtractor : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        val body = app.get(url, headers = HTML_HEADERS + mapOf("Referer" to (referer ?: "$mainUrl/"))).text
-        val src  = tryUnpack(body) ?: body
-
+        val body     = app.get(url, headers = HTML_HEADERS + mapOf("Referer" to (referer ?: "$mainUrl/"))).text
+        val src      = tryUnpack(body) ?: body
         val videoUrl = videoPatterns.firstNotNullOfOrNull { it.find(src)?.groupValues?.get(1) }
             ?.takeIf { it.isNotBlank() } ?: return
 
-        val origin = runCatching { java.net.URL(url).let { "${it.protocol}://${it.host}/" } }
-            .getOrDefault(referer ?: "$mainUrl/")
+        val origin = runCatching {
+            val u = java.net.URL(url)
+            "${u.protocol}://${u.host}/"
+        }.getOrDefault(referer ?: "$mainUrl/")
 
         callback(
             newExtractorLink(name, name, videoUrl, detectLinkType(videoUrl)) {
@@ -99,8 +122,7 @@ class FiledonExtractor : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        val body = app.get(url, headers = HTML_HEADERS + mapOf("Referer" to (referer ?: "$mainUrl/"))).text
-
+        val body     = app.get(url, headers = HTML_HEADERS + mapOf("Referer" to (referer ?: "$mainUrl/"))).text
         val raw      = Regex("""data-page="([^"]+)"""").find(body)?.groupValues?.get(1) ?: return
         val videoUrl = runCatching {
             JSONObject(raw.unescapeHtml()).getJSONObject("props").getString("url")
@@ -139,7 +161,6 @@ open class OndesuExtractor : ExtractorApi() {
             ).find(body)?.groupValues?.get(1)
             ?: return
 
-        // Direct googlevideo link inside iframe src
         if (bloggerUrl.contains("googlevideo.com")) {
             callback(
                 newExtractorLink(name, name, bloggerUrl, ExtractorLinkType.VIDEO) {
