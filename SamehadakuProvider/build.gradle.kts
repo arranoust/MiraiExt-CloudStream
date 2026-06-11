@@ -1,6 +1,16 @@
 // use an integer for version numbers
 version = 15
 
+dependencies {
+    implementation("androidx.appcompat:appcompat:1.7.1")
+    implementation("com.google.android.material:material:1.14.0") 
+}
+
+android {
+    buildFeatures {
+        buildConfig = true
+    }
+}
 
 cloudstream {
     language = "id"

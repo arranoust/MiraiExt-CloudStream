@@ -1,6 +1,7 @@
 package com.samehadaku
 
 import android.content.Context
+import androidx.fragment.app.FragmentActivity 
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 
@@ -13,9 +14,12 @@ class SamehadakuPlugin : Plugin() {
         registerMainAPI(SamehadakuProvider(sharedPref))
         registerExtractorAPI(FiledonExtractor())
 
-        openSettings = {
-            val frag = SettingsFragment(sharedPref)
-            frag.show(it.supportFragmentManager, "SamehadakuSettings")
+        openSettings = { ctx -> 
+            val activity = ctx as? FragmentActivity
+            activity?.let {
+                val frag = SettingsFragment(sharedPref)
+                frag.show(it.supportFragmentManager, "SamehadakuSettings")
+            }
         }
     }
 }
