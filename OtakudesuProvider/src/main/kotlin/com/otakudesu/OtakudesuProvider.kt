@@ -52,8 +52,8 @@ class OtakudesuProvider : MainAPI() {
 
     private fun Element.toSearchResult(): AnimeSearchResponse? {
         val title     = selectFirst("h2.jdlflm")?.text()?.trim() ?: return null
-        val href      = selectFirst("a")?.attr("href") ?: return null
-        val posterUrl = select("div.thumbz > img").attr("src").takeIf { it.isNotBlank() }
+        val href      = selectFirst("a")!!.attr("href")
+        val posterUrl = select("div.thumbz > img").attr("src").toString()
         val epNum     = selectFirst("div.epz")?.ownText()
             ?.replace(Regex("\\D"), "")?.trim()?.toIntOrNull()
         return newAnimeSearchResponse(title, href, TvType.Anime) {
@@ -64,50 +64,39 @@ class OtakudesuProvider : MainAPI() {
 
     // ================== Search ==================
     override suspend fun search(query: String): List<SearchResponse> {
-        val document = app.get("$mainUrl/?s=${query.encodeUrl()}&post_type=anime").document
-        val items    = document.select(".chivsrc li").mapNotNull { li ->
-            val a      = li.selectFirst("h2 a") ?: return@mapNotNull null
-            val href   = fixUrlNull(a.attr("href")) ?: return@mapNotNull null
-            val title  = a.text().trim().takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            val poster = fixUrlNull(li.selectFirst("img")?.attr("src"))
-            newAnimeSearchResponse(title, href, TvType.Anime) { this.posterUrl = poster }
-        }
-        if (items.isNotEmpty()) return items
-        return document.select("div.venz > ul > li").mapNotNull { it.toSearchResult() }
+        return app.get("$mainUrl/?s=$query&post_type=anime").document
+            .select("ul.chivsrc > li")
+            .map {
+                val title     = it.selectFirst("h2 > a")!!.ownText().trim()
+                val href      = it.selectFirst("h2 > a")!!.attr("href")
+                val posterUrl = it.selectFirst("img")!!.attr("src").toString()
+                newAnimeSearchResponse(title, href, TvType.Anime) { this.posterUrl = posterUrl }
+            }
     }
 
     // ================== Load Anime ==================
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
-        val infoMap = mutableMapOf<String, String>()
-        document.select(".infozingle p span").forEach { span ->
-            val text  = span.text()
-            val colon = text.indexOf(':')
-            if (colon == -1) return@forEach
-            val label = text.substring(0, colon).trim().lowercase()
-            val value = text.substring(colon + 1).trim()
-            if (label.isNotBlank() && value.isNotBlank()) infoMap[label] = value
-        }
+        val title = document.selectFirst("div.infozingle > p:nth-child(1) > span")
+            ?.ownText()?.replace(":", "")?.trim() ?: return null
 
-        val rawTitle = document.selectFirst("h1.entry-title")?.text() ?: return null
-        val title    = infoMap["judul"]?.trim() ?: rawTitle.trim()
-        val engTitle = infoMap["english"]?.trim() ?: infoMap["judul inggris"]?.trim()
-        val japTitle = infoMap["japanese"]?.trim() ?: infoMap["judul jepang"]?.trim()
-
-        val poster    = document.selectFirst(".fotoanime img")?.attr("src")
-        val synopsis  = document.select(".sinopc p").text().trim()
-        val tags      = document.select(".infozingle p:contains(Genre) a").map { it.text() }
-        val statusStr = infoMap["status"] ?: ""
-        val typeStr   = infoMap["type"]   ?: ""
-        val type      = getType(typeStr)
-        val year      = yearRegex.find(infoMap["tanggal rilis"] ?: infoMap["rilis"] ?: "")
-                            ?.value?.toIntOrNull()
+        val poster    = document.selectFirst("div.fotoanime > img")?.attr("src")
+        val synopsis  = document.select("div.sinopc > p").text()
+        val tags      = document.select("div.infozingle > p:nth-child(11) > span > a").map { it.text() }
+        val type      = getType(
+            document.selectFirst("div.infozingle > p:nth-child(5) > span")
+                ?.ownText()?.replace(":", "")?.trim() ?: "tv"
+        )
+        val statusStr = document.selectFirst("div.infozingle > p:nth-child(6) > span")
+            ?.ownText()?.replace(":", "")?.trim() ?: ""
+        val year      = yearRegex.find(
+            document.select("div.infozingle > p:nth-child(9) > span").text()
+        )?.value?.toIntOrNull()
         val trailer   = document.selectFirst("div.trailer-anime iframe, #trailer iframe")?.attr("src")
 
-        val searchTitles = listOfNotNull(engTitle, title, japTitle).filter { it.isNotBlank() }
-        val tracker      = APIHolder.getTracker(searchTitles, TrackerType.getTypes(type), year, true)
-        val malId        = tracker?.malId
+        val tracker = APIHolder.getTracker(listOf(title), TrackerType.getTypes(type), year, true)
+        val malId   = tracker?.malId
 
         var aniZip:  AniZipData? = null
         var tmdbId:  Int?        = null
@@ -126,49 +115,49 @@ class OtakudesuProvider : MainAPI() {
         val logoUrl          = fetchTmdbLogoUrl(type, tmdbId, "en")
         val backgroundPoster = aniZip?.images?.find { it.coverType == "Fanart" }?.url ?: tracker?.cover
 
-        val episodes = document.select("div.episodelist").getOrNull(1)
-            ?.select("ul > li")
-            ?.amap { el ->
-                val a    = el.selectFirst("a") ?: return@amap null
-                val href = fixUrl(a.attr("href"))
-                val name = a.text().trim()
+        val episodes = document.select("div.episodelist")[1].select("ul > li").amap { element ->
+            val name = element.selectFirst("a")?.text() ?: return@amap null
+            var epNum = episodeNumRegex.find(name)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            val link  = fixUrl(element.selectFirst("a")!!.attr("href"))
 
-                var epNum = episodeNumRegex.find(name)?.groupValues?.get(1)?.toIntOrNull()
-                if (type == TvType.AnimeMovie && epNum == null) epNum = 1
+            if (type == TvType.AnimeMovie && epNum == null) epNum = 1
 
-                val aniEp = epNum?.let { aniZip?.episodes?.get(it.toString()) }
+            val aniEp = epNum?.let { aniZip?.episodes?.get(it.toString()) }
 
-                newEpisode(href) {
-                    this.name        = aniEp?.title?.get("en") ?: aniEp?.title?.get("ja") ?: name
-                    this.episode     = epNum
-                    this.posterUrl   = aniEp?.image ?: aniZip?.images?.firstOrNull()?.url ?: ""
-                    this.description = aniEp?.overview?.takeIf { it.isNotBlank() }
-                        ?: "Synopsis not yet available."
-                    this.runTime     = aniEp?.runtime
-                    this.addDate(aniEp?.airDateUtc)
+            newEpisode(link) {
+                this.name = if (type == TvType.AnimeMovie) {
+                    aniZip?.titles?.get("en") ?: aniZip?.titles?.get("ja") ?: title
+                } else {
+                    aniEp?.title?.get("en") ?: aniEp?.title?.get("ja") ?: name
                 }
-            }?.filterNotNull()?.reversed() ?: emptyList()
+                this.episode     = epNum
+                this.posterUrl   = aniEp?.image ?: aniZip?.images?.firstOrNull()?.url ?: ""
+                this.description = aniEp?.overview?.takeIf { it.isNotBlank() }
+                    ?: "Synopsis not yet available."
+                this.runTime     = aniEp?.runtime
+                this.addDate(aniEp?.airDateUtc)
+            }
+        }.filterNotNull().reversed()
 
         val recommendations = document
             .select("div.isi-recommend-anime-series > div.isi-konten")
-            .mapNotNull { el ->
-                val a       = el.selectFirst("a") ?: return@mapNotNull null
-                val href    = fixUrlNull(a.attr("href")) ?: return@mapNotNull null
-                val rTitle  = el.selectFirst("span.judul-anime > a")?.text() ?: return@mapNotNull null
-                val rPoster = fixUrlNull(el.selectFirst("a > img")?.attr("src"))
-                newAnimeSearchResponse(rTitle, href, TvType.Anime) { this.posterUrl = rPoster }
+            .map {
+                val recName     = it.selectFirst("span.judul-anime > a")!!.text()
+                val recHref     = it.selectFirst("a")!!.attr("href")
+                val recPoster   = it.selectFirst("a > img")?.attr("src").toString()
+                newAnimeSearchResponse(recName, recHref, TvType.Anime) { this.posterUrl = recPoster }
             }
 
         val finalPlot = aniZip?.description?.replace(Regex("<.*?>"), "")
             ?: aniZip?.episodes?.get("1")?.overview?.takeIf { it.isNotBlank() }
             ?: synopsis
 
-        return newAnimeLoadResponse(title, url, type) {
-            this.engName             = engTitle ?: aniZip?.titles?.get("en") ?: title
-            this.japName             = japTitle ?: aniZip?.titles?.get("ja")
+        return newAnimeLoadResponse(title, url, TvType.Anime) {
+            this.engName             = aniZip?.titles?.get("en") ?: title
+            this.japName             = aniZip?.titles?.get("ja") ?: aniZip?.titles?.get("x-jat")
             this.posterUrl           = tracker?.image ?: poster
             this.backgroundPosterUrl = backgroundPoster
-            runCatching { this.logoUrl = logoUrl }
+            try { this.logoUrl = logoUrl } catch (_: Throwable) {}
             this.year                = year
             addEpisodes(DubStatus.Subbed, episodes)
             this.showStatus          = getStatus(statusStr)
@@ -178,7 +167,7 @@ class OtakudesuProvider : MainAPI() {
             addTrailer(trailer)
             addMalId(malId)
             addAniListId(tracker?.aniId?.toIntOrNull())
-            runCatching { addKitsuId(kitsuId) }
+            try { addKitsuId(kitsuId) } catch (_: Throwable) {}
         }
     }
 
@@ -190,56 +179,79 @@ class OtakudesuProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val document = app.get(data).document
-        val actions  = fetchAjaxActions(document, data)
 
-        // Mirror stream — handled by custom extractors (Odstream, Ondesu, Filedon)
-        if (actions != null) {
-            document.select(".mirrorstream ul li a[data-content]").amap { btn ->
-                val b64 = btn.attr("data-content").trim()
-                    .takeIf { it.isNotBlank() && it != "#" } ?: return@amap
+        val scriptData = document.select("script")
+            .firstOrNull { it.data().contains("admin-ajax") && it.data().contains("action") }
+            ?.data() ?: ""
 
-                val token = runCatching {
-                    mapper.readTree(
-                        android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+        val nonceAction = Regex("""data\s*:\s*\{action\s*:\s*["']([^"']+)["']""").find(scriptData)
+            ?.groupValues?.get(1)
+            ?: Regex("""action\s*:\s*["']([a-f0-9]{32})["']""").find(scriptData)
+                ?.groupValues?.get(1)
+
+        val embedAction = Regex("""nonce[^,]*,\s*action\s*:\s*["']([a-f0-9]{32})["']""")
+            .find(scriptData)?.groupValues?.get(1)
+
+        // Mirror stream — custom + built-in extractors via loadExtractor
+        if (nonceAction != null && embedAction != null) {
+            val nonce = runCatching {
+                mapper.readTree(
+                    app.post(
+                        "$mainUrl/wp-admin/admin-ajax.php",
+                        headers = ajaxHeaders(data),
+                        data    = mapOf("action" to nonceAction)
+                    ).text
+                )?.get("data")?.asText()?.takeIf { it.isNotBlank() }
+            }.getOrNull()
+
+            if (nonce != null) {
+                document.select(".mirrorstream ul li a[data-content]").amap { btn ->
+                    val b64 = btn.attr("data-content").trim()
+                        .takeIf { it.isNotBlank() && it != "#" } ?: return@amap
+
+                    val token = runCatching {
+                        mapper.readTree(
+                            android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                                .toString(Charsets.UTF_8)
+                        )
+                    }.getOrNull() ?: return@amap
+
+                    val id = token.get("id")?.asText() ?: return@amap
+                    val i  = token.get("i")?.asText()  ?: ""
+                    val q  = token.get("q")?.asText()  ?: ""
+
+                    val embedB64 = runCatching {
+                        mapper.readTree(
+                            app.post(
+                                "$mainUrl/wp-admin/admin-ajax.php",
+                                headers = ajaxHeaders(data),
+                                data    = mapOf(
+                                    "id"     to id,
+                                    "i"      to i,
+                                    "q"      to q,
+                                    "nonce"  to nonce,
+                                    "action" to embedAction
+                                )
+                            ).text
+                        )?.get("data")?.asText()
+                    }.getOrNull()?.takeIf { it.isNotBlank() } ?: return@amap
+
+                    val iframeHtml = runCatching {
+                        android.util.Base64.decode(embedB64, android.util.Base64.DEFAULT)
                             .toString(Charsets.UTF_8)
-                    )
-                }.getOrNull() ?: return@amap
+                    }.getOrNull() ?: return@amap
 
-                val id = token.get("id")?.asText() ?: return@amap
-                val i  = token.get("i")?.asText()  ?: ""
-                val q  = token.get("q")?.asText()  ?: ""
+                    val embedUrl = Regex("""<iframe[^>]+src=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+                        .find(iframeHtml)?.groupValues?.get(1)
+                        ?: iframeHtml.trim().takeIf { it.startsWith("http") }
+                        ?: return@amap
 
-                val embedB64 = runCatching {
-                    mapper.readTree(
-                        app.post(
-                            "$mainUrl/wp-admin/admin-ajax.php",
-                            headers = ajaxHeaders(data),
-                            data    = mapOf(
-                                "id"     to id,
-                                "i"      to i,
-                                "q"      to q,
-                                "nonce"  to actions.nonce,
-                                "action" to actions.embedAction
-                            )
-                        ).text
-                    )?.get("data")?.asText()
-                }.getOrNull()?.takeIf { it.isNotBlank() } ?: return@amap
-
-                val iframeHtml = runCatching {
-                    android.util.Base64.decode(embedB64, android.util.Base64.DEFAULT)
-                        .toString(Charsets.UTF_8)
-                }.getOrNull() ?: return@amap
-
-                val embedUrl = Regex("""<iframe[^>]+src=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
-                    .find(iframeHtml)?.groupValues?.get(1)
-                    ?: iframeHtml.trim().takeIf { it.startsWith("http") }
-                    ?: return@amap
-
-                loadFixedExtractor(embedUrl, q, data, subtitleCallback, callback)
+                    loadFixedExtractor(embedUrl, q, data, subtitleCallback, callback)
+                }
             }
         }
 
-        // Download — follow desustream redirect → built-in loadExtractor
+        // Download — follow desustream redirect then built-in loadExtractor
         document.select(".download ul li").amap { li ->
             val quality = li.selectFirst("strong")?.text()?.trim() ?: ""
             li.select("a[href]").amap { a ->
@@ -247,7 +259,7 @@ class OtakudesuProvider : MainAPI() {
                 val finalUrl = runCatching {
                     app.get(href, referer = "$mainUrl/").url
                 }.getOrNull()?.takeIf { it.isNotBlank() } ?: href
-                loadExtractor(finalUrl, data, subtitleCallback, callback)
+                loadFixedExtractor(finalUrl, quality, data, subtitleCallback, callback)
             }
         }
 
@@ -255,38 +267,6 @@ class OtakudesuProvider : MainAPI() {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private data class AjaxActions(val nonce: String, val embedAction: String)
-
-    /** Parses nonce action + embed action from inline script, then fetches nonce value. */
-    private suspend fun fetchAjaxActions(
-        document: org.jsoup.nodes.Document,
-        referer: String
-    ): AjaxActions? {
-        val scriptData = document.select("script")
-            .firstOrNull { it.data().contains("admin-ajax") && it.data().contains("action") }
-            ?.data() ?: return null
-
-        val nonceAction = Regex("""data\s*:\s*\{action\s*:\s*["']([^"']+)["']""").find(scriptData)
-            ?.groupValues?.get(1)
-            ?: Regex("""action\s*:\s*["']([a-f0-9]{32})["']""").find(scriptData)
-                ?.groupValues?.get(1) ?: return null
-
-        val embedAction = Regex("""nonce[^,]*,\s*action\s*:\s*["']([a-f0-9]{32})["']""")
-            .find(scriptData)?.groupValues?.get(1) ?: return null
-
-        val nonce = runCatching {
-            mapper.readTree(
-                app.post(
-                    "$mainUrl/wp-admin/admin-ajax.php",
-                    headers = ajaxHeaders(referer),
-                    data    = mapOf("action" to nonceAction)
-                ).text
-            )?.get("data")?.asText()?.takeIf { it.isNotBlank() }
-        }.getOrNull() ?: return null
-
-        return AjaxActions(nonce, embedAction)
-    }
 
     private fun ajaxHeaders(referer: String) = mapOf(
         "Content-Type"     to "application/x-www-form-urlencoded",
@@ -332,7 +312,8 @@ class OtakudesuProvider : MainAPI() {
         fun path(o: JSONObject)  = o.optString("file_path")
         fun isSvg(o: JSONObject) = path(o).endsWith(".svg", true)
         fun urlOf(o: JSONObject) = "https://image.tmdb.org/t/p/w500${path(o)}"
-        fun voted(o: JSONObject) = o.optDouble("vote_average", 0.0) > 0 && o.optInt("vote_count", 0) > 0
+        fun voted(o: JSONObject) = o.optDouble("vote_average", 0.0) > 0
+            && o.optInt("vote_count", 0) > 0
         fun better(a: JSONObject?, b: JSONObject): Boolean {
             if (a == null) return true
             return b.optDouble("vote_average", 0.0) > a.optDouble("vote_average", 0.0)
@@ -360,8 +341,6 @@ class OtakudesuProvider : MainAPI() {
         }
         return best?.let { urlOf(it) } ?: bestSvg?.let { urlOf(it) }
     }
-
-    private fun String.encodeUrl(): String = java.net.URLEncoder.encode(this, "UTF-8")
 
     // ================== Data Classes ==================
     @JsonIgnoreProperties(ignoreUnknown = true)
