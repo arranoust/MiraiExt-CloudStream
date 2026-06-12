@@ -26,7 +26,7 @@ class FiledonExtractor : ExtractorApi() {
             url,
             headers = mapOf(
                 "User-Agent" to "Mozilla/5.0",
-                "Referer"    to (referer ?: "$mainUrl/")
+                "Referer"    to ref
             )
         ).text
 
@@ -56,7 +56,7 @@ class FiledonExtractor : ExtractorApi() {
 
         callback(
             newExtractorLink(name, name, videoUrl, ExtractorLinkType.VIDEO) {
-                this.referer = "$mainUrl/"
+                this.referer = ref
                 this.quality = Regex("""(\d{3,4})[pP]""").find(videoUrl)
                     ?.groupValues?.get(1)?.toIntOrNull()
                     ?: Qualities.Unknown.value

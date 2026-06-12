@@ -13,7 +13,7 @@ import org.json.JSONObject
 import org.jsoup.nodes.Element
 import kotlinx.coroutines.runBlocking
 
-class SamehadakuProvider(private val sharedPref: android.content.SharedPreferences? = null) : MainAPI() {
+class SamehadakuProvider : MainAPI() {
     override var mainUrl = "https://v2.samehadaku.how"
     override var name = "Samehadaku"
     override val hasMainPage = true
@@ -22,6 +22,7 @@ class SamehadakuProvider(private val sharedPref: android.content.SharedPreferenc
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
 
     companion object {
+        const val MAIN_URL = "https://v2.samehadaku.how"
         var context: android.content.Context? = null
 
         private val mapper = ObjectMapper()
@@ -228,7 +229,7 @@ class SamehadakuProvider(private val sharedPref: android.content.SharedPreferenc
         document.select("div#downloadb li").amap { el ->
             val quality = el.select("strong").text()
             el.select("a").amap {
-                loadFixedExtractor(fixUrl(it.attr("href")), quality, "$mainUrl/", subtitleCallback, filteredCallback)
+                loadFixedExtractor(fixUrl(it.attr("href")), quality, "$mainUrl/", subtitleCallback, callback)
             }
         }
 
