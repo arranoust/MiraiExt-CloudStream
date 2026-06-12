@@ -22,7 +22,6 @@ class SamehadakuProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
 
     companion object {
-        const val MAIN_URL = "https://v2.samehadaku.how"
         var context: android.content.Context? = null
 
         private val mapper = ObjectMapper()
@@ -214,18 +213,9 @@ class SamehadakuProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val prefQuality = sharedPref?.getString(SettingsFragment.PREF_QUALITY, "-1") ?: "-1"
-        val prefMirror  = sharedPref?.getString(SettingsFragment.PREF_MIRROR,  "")  ?: ""
-
-        val filteredCallback: (ExtractorLink) -> Unit = { link ->
-            val mirrorMatch = prefMirror.isBlank() ||
-                link.name.contains(prefMirror, ignoreCase = true) ||
-                link.url.contains(prefMirror,  ignoreCase = true)
-            if (mirrorMatch) callback(link)
-        }
-
         val document = app.get(data).document
 
+        // --- Download mirrors ---
         document.select("div#downloadb li").amap { el ->
             val quality = el.select("strong").text()
             el.select("a").amap {
@@ -233,6 +223,7 @@ class SamehadakuProvider : MainAPI() {
             }
         }
 
+        // --- Stream mirrors  ---
         document.select("div.east_player_option[data-post][data-nume]").amap { btn ->
             val postId = btn.attr("data-post").takeIf { it.isNotBlank() } ?: return@amap
             val nume   = btn.attr("data-nume").takeIf { it.isNotBlank() } ?: return@amap
@@ -241,17 +232,16 @@ class SamehadakuProvider : MainAPI() {
 
             val iframeUrl = fetchStreamIframe(postId, nume, type) ?: return@amap
 
+            // Direct video file 
             if (isDirectVideoUrl(iframeUrl) || iframeUrl.contains("wibufile.com", ignoreCase = true)) {
-                val link = newExtractorLink(label, label, iframeUrl, ExtractorLinkType.VIDEO) {
-                    this.referer = data
-                    this.quality = label.fixQuality()
-                }
-                val mirrorMatch = prefMirror.isBlank() ||
-                    label.contains(prefMirror, ignoreCase = true) ||
-                    iframeUrl.contains(prefMirror, ignoreCase = true)
-                if (mirrorMatch) callback(link)
+                callback(
+                    newExtractorLink(label, label, iframeUrl, ExtractorLinkType.VIDEO) {
+                        this.referer = "$mainUrl/"
+                        this.quality = label.fixQuality()
+                    }
+                )
             } else {
-                loadFixedExtractor(iframeUrl, label, data, subtitleCallback, filteredCallback)
+                loadFixedExtractor(iframeUrl, label, "$mainUrl/", subtitleCallback, callback)
             }
         }
 
