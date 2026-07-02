@@ -49,7 +49,6 @@ internal fun parseQuality(vararg sources: String): Int {
  * Extracts the packed string from eval(function(p,a,c,k,e,...){...}('...')) and decodes it.
  */
 internal fun unpackJs(source: String): String? {
-    // Extract the arguments passed to the packed function: ('payload',radix,count,'keys',...)
     val match = Regex(
         """}\s*\(\s*'((?:[^'\\]|\\.)*)',\s*(\d+),\s*(\d+),\s*'((?:[^'\\]|\\.)*)'\s*\.split"""
     ).find(source) ?: return null
@@ -72,7 +71,7 @@ internal fun tryUnpack(source: String): String? {
     return runCatching { unpackJs(source) }.getOrNull()
 }
 
-// ── OdstreamExtractor (resolveWithUnpack) ─────────────────────────────────────
+// ── OdstreamExtractor ─────────────────────────────────────
 class OdstreamExtractor : ExtractorApi() {
     override val name            = "Odstream"
     override val mainUrl         = "https://odstream.xyz"
@@ -110,7 +109,7 @@ class OdstreamExtractor : ExtractorApi() {
     }
 }
 
-// ── FiledonExtractor (resolveFiledon) ─────────────────────────────────────────
+// ── FiledonExtractor ─────────────────────────────────────────
 class FiledonExtractor : ExtractorApi() {
     override val name            = "Filedon"
     override val mainUrl         = "https://filedon.co"
@@ -137,7 +136,7 @@ class FiledonExtractor : ExtractorApi() {
     }
 }
 
-// ── OndesuExtractor (resolveOndesu → resolveBlogger) ─────────────────────────
+// ── OndesuExtractor ─────────────────────────
 open class OndesuExtractor : ExtractorApi() {
     override val name            = "Ondesu"
     override val mainUrl         = "https://ondesu.cc"

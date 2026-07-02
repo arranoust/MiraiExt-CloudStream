@@ -7,6 +7,7 @@ import com.lagradost.cloudstream3.plugins.Plugin
 @CloudstreamPlugin
 class OtakudesuPlugin : Plugin() {
     override fun load(context: Context) {
+        OtakudesuProvider.context = context
         registerMainAPI(OtakudesuProvider())
         registerExtractorAPI(OdstreamExtractor())
         registerExtractorAPI(FiledonExtractor())
