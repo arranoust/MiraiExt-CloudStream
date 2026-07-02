@@ -166,8 +166,16 @@ class BstationProvider : MainAPI() {
 
         playurl.video?.forEach { v ->
             v.videoResource?.url?.takeIf { it.isNotBlank() }?.let { vUrl ->
-                callback(newExtractorLink(name, "$name ${v.streamInfo?.quality ?: "Auto"}p", vUrl, INFER_TYPE, getQuality(v.streamInfo?.quality ?: 0)) {
-                    headers = streamHdr; audioTracks = audio
+                val qn = v.streamInfo?.quality ?: 0
+                callback(newExtractorLink(
+                    name,
+                    "$name ${qn}p",
+                    vUrl,
+                    INFER_TYPE
+                ) {
+                    quality = getQuality(qn)
+                    headers = streamHdr
+                    this.audioTracks = audio
                 })
             }
         }
