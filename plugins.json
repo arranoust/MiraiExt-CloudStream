@@ -1,0 +1,109 @@
+[
+    {
+        "url": "https://raw.githubusercontent.com/arranoust/MiraiExt-CloudStream/builds/AnimasuProvider.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "AnimasuProvider",
+        "internalName": "AnimasuProvider",
+        "authors": [
+            "arranoust"
+        ],
+        "description": "Animasu - Tempat nonton anime paling lengkap dan terbaru subtitle Indonesia.",
+        "fileSize": 27660,
+        "repositoryUrl": "https://github.com/arranoust/MiraiExt-CloudStream",
+        "language": "id",
+        "tvTypes": [
+            "AnimeMovie",
+            "Anime",
+            "OVA"
+        ],
+        "iconUrl": "https://1.bp.blogspot.com/-713bWoqV1B8/XcKqwjGjsZI/AAAAAAAAFiM/3nA8P_d50FcCWEnw6uhSeVEtPzKDH6_eQCLcBGAsYHQ/s1600/animasu.ico",
+        "apiVersion": 1,
+        "fileHash": "sha256-65024c76e37911691828e240cab7308552ab6d3c3748c69bb3804f52a230db32"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/arranoust/MiraiExt-CloudStream/builds/KuronimeProvider.cs3",
+        "status": 1,
+        "version": 2,
+        "name": "KuronimeProvider",
+        "internalName": "KuronimeProvider",
+        "authors": [
+            "arranoust"
+        ],
+        "description": "Kuronime - Situs Nonton Anime Subtitle Indonesia Secara Online.",
+        "fileSize": 39318,
+        "repositoryUrl": "https://github.com/arranoust/MiraiExt-CloudStream",
+        "language": "id",
+        "tvTypes": [
+            "AnimeMovie",
+            "Anime"
+        ],
+        "iconUrl": "https://i3.wp.com/kuronime.sbs/wp-content/uploads/2020/08/cropped-favicon-1-192x192.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-11dc26d2c3bbeb9a95be35b068b90e5d8dd999789c27fa6a0b18b448319d7cc9"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/arranoust/MiraiExt-CloudStream/builds/OtakudesuProvider.cs3",
+        "status": 1,
+        "version": 8,
+        "name": "OtakudesuProvider",
+        "internalName": "OtakudesuProvider",
+        "authors": [
+            "arranoust"
+        ],
+        "description": "Otakudesu - Nonton anime sub Indo terlengkap.",
+        "fileSize": 44572,
+        "repositoryUrl": "https://github.com/arranoust/MiraiExt-CloudStream",
+        "language": "id",
+        "tvTypes": [
+            "AnimeMovie",
+            "Anime",
+            "OVA"
+        ],
+        "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRr-sfek8gXmLpcAppEpaYbUDVtndQbCm_boh1-E91QrmSvsw-2l3-s2JOP&s=10",
+        "apiVersion": 1,
+        "fileHash": "sha256-223c4743458915a667c0b08d51de5a22b4d43740794f454dd449fd21cde818c3"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/arranoust/MiraiExt-CloudStream/builds/SamehadakuProvider.cs3",
+        "status": 1,
+        "version": 23,
+        "name": "SamehadakuProvider",
+        "internalName": "SamehadakuProvider",
+        "authors": [
+            "arranoust"
+        ],
+        "description": "Samehadaku - Nonton anime sub Indo terbaru dengan kualitas video HD terlengkap.",
+        "fileSize": 45490,
+        "repositoryUrl": "https://github.com/arranoust/MiraiExt-CloudStream",
+        "language": "id",
+        "tvTypes": [
+            "AnimeMovie",
+            "Anime",
+            "OVA"
+        ],
+        "iconUrl": "https://v2.samehadaku.how/wp-content/uploads/2020/04/cropped-download-1-192x192.jpg",
+        "apiVersion": 1,
+        "fileHash": "sha256-fe3ef7cb867cba724c44a837c815d4a9da11ddfa0691723e1332e488a1e72a10"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/arranoust/MiraiExt-CloudStream/builds/SokujaProvider.cs3",
+        "status": 1,
+        "version": 2,
+        "name": "SokujaProvider",
+        "internalName": "SokujaProvider",
+        "authors": [
+            "arranoust"
+        ],
+        "description": "Sokuja - Nonton anime subtitle Indonesia.",
+        "fileSize": 29842,
+        "repositoryUrl": "https://github.com/arranoust/MiraiExt-CloudStream",
+        "language": "id",
+        "tvTypes": [
+            "Anime"
+        ],
+        "iconUrl": "https://x6.sokuja.uk/favicon.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-c20bf2dcb1fc39f974f352bb4b758e9023dc6939115d3ca838e2bdbbf2d522b4"
+    }
+]
