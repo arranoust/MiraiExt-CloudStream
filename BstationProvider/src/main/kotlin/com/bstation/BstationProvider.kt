@@ -370,7 +370,7 @@ class BstationProvider : MainAPI() {
             val streamHdr  = mapOf("User-Agent" to UA, "Referer" to "$mainUrl/", "Origin" to mainUrl)
 
             val audioUrl   = playurl.audioResource?.firstOrNull()?.url?.trim()?.takeIf { it.isNotEmpty() }
-            val audioTracks = buildList {
+            val extractedAudioTracks = buildList {
                 audioUrl?.let { add(newAudioFile(it) { this.headers = streamHdr }) }
             }
 
@@ -400,7 +400,7 @@ class BstationProvider : MainAPI() {
                 quality     = qualityValue(primaryQn)
                 referer     = mainUrl
                 this.headers = streamHdr
-                audioTracks = audioTracks
+                this.audioTracks = extractedAudioTracks
             })
 
             for (v in videoList) {
@@ -411,7 +411,7 @@ class BstationProvider : MainAPI() {
                     quality     = qualityValue(qn)
                     referer     = mainUrl
                     this.headers = streamHdr
-                    audioTracks = audioTracks
+                    this.audioTracks = extractedAudioTracks
                 })
             }
             true
