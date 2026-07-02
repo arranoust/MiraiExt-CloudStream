@@ -1,0 +1,68 @@
+[
+    {
+        "url": "https://raw.githubusercontent.com/arranoust/MiraiExt-CloudStream/builds/BstationProvider.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "BstationProvider",
+        "internalName": "BstationProvider",
+        "authors": [
+            "arranoust"
+        ],
+        "description": "Bstation - Anime & drama dengan subtitle Indonesia.",
+        "fileSize": 52790,
+        "repositoryUrl": "https://github.com/arranoust/MiraiExt-CloudStream",
+        "language": "id",
+        "tvTypes": [
+            "Anime",
+            "Movie",
+            "TvSeries"
+        ],
+        "iconUrl": "https://p.bstarstatic.com/fe-static/deps/bilibili_tv.ico",
+        "apiVersion": 1,
+        "fileHash": "sha256-04eadf59578eb44b402a73992b2491964b245e7df6949bbee827f527dc289c6a"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/arranoust/MiraiExt-CloudStream/builds/OtakudesuProvider.cs3",
+        "status": 1,
+        "version": 7,
+        "name": "OtakudesuProvider",
+        "internalName": "OtakudesuProvider",
+        "authors": [
+            "arranoust"
+        ],
+        "description": "Otakudesu - Nonton anime sub Indo terlengkap.",
+        "fileSize": 43309,
+        "repositoryUrl": "https://github.com/arranoust/MiraiExt-CloudStream",
+        "language": "id",
+        "tvTypes": [
+            "AnimeMovie",
+            "Anime",
+            "OVA"
+        ],
+        "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRr-sfek8gXmLpcAppEpaYbUDVtndQbCm_boh1-E91QrmSvsw-2l3-s2JOP&s=10",
+        "apiVersion": 1,
+        "fileHash": "sha256-25dba985c6ff6ffe81592afeeac45dcb2efeda03a203f8f1114fbc1a02fad215"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/arranoust/MiraiExt-CloudStream/builds/SamehadakuProvider.cs3",
+        "status": 1,
+        "version": 17,
+        "name": "SamehadakuProvider",
+        "internalName": "SamehadakuProvider",
+        "authors": [
+            "arranoust"
+        ],
+        "description": "Samehadaku - Nonton anime sub Indo terbaru dengan kualitas video HD terlengkap.",
+        "fileSize": 37061,
+        "repositoryUrl": "https://github.com/arranoust/MiraiExt-CloudStream",
+        "language": "id",
+        "tvTypes": [
+            "AnimeMovie",
+            "Anime",
+            "OVA"
+        ],
+        "iconUrl": "https://v2.samehadaku.how/wp-content/uploads/2020/04/cropped-download-1-192x192.jpg",
+        "apiVersion": 1,
+        "fileHash": "sha256-eef0a36cc5cf1fdf5aaa0331a0dffdfaf06f3087d9621f13df9865f41a0c37f4"
+    }
+]
