@@ -10,7 +10,6 @@ import com.lagradost.cloudstream3.utils.newExtractorLink
 import org.json.JSONObject
 
 // ── Filedon ───────────────────────────────────────────────────────────────────
-// Embed page has data-page JSON attribute → props.url (MP4/MKV on filedon.uqni.net or r2)
 class FiledonExtractor : ExtractorApi() {
     override val name            = "Filedon"
     override val mainUrl         = "https://filedon.co"
@@ -46,7 +45,6 @@ class FiledonExtractor : ExtractorApi() {
                 .getString("url")
         }.getOrNull()?.takeIf { it.isNotBlank() } ?: return
 
-        // Accept MP4, MKV, and R2/CDN URLs (filedon.uqni.net, *.r2.*)
         val isPlayable = videoUrl.contains(".mp4", ignoreCase = true)
                       || videoUrl.contains(".mkv", ignoreCase = true)
                       || videoUrl.contains(".r2.")
