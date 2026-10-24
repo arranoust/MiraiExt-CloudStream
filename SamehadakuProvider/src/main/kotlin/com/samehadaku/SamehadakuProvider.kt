@@ -282,7 +282,7 @@ class SamehadakuProvider : MainAPI() {
                      ?: description
                      ?: ""
 
-        return newAnimeLoadResponse(title, fixUrl, TvType.Anime) {
+        return newAnimeLoadResponse(title, url, type) {
             this.engName             = engName ?: meta?.data?.titles?.get("en") ?: title
             this.japName             = japName ?: meta?.data?.titles?.get("ja") ?: meta?.data?.titles?.get("x-jat")
             this.posterUrl           = tracker?.image ?: poster
