@@ -11,6 +11,7 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import com.lagradost.cloudstream3.utils.*
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
+import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 
 class SamehadakuProvider : MainAPI() {
@@ -55,9 +56,13 @@ class SamehadakuProvider : MainAPI() {
         val doc      = app.get("$mainUrl/${request.data.format(page)}").document
         val isLatest = request.data.contains("anime-terbaru")
         val homeList = if (isLatest) {
-            doc.select("li[itemtype='http://schema.org/CreativeWork']").mapNotNull { it.toLatestAnimeResult() }
+            doc.select("li[itemtype='http://schema.org/CreativeWork'], li[itemtype='https://schema.org/CreativeWork']")
+                .mapNotNull { it.toLatestAnimeResult() }
+                .ifEmpty { doc.select("ul > li").mapNotNull { it.toLatestAnimeResult() } }
         } else {
-            doc.select("div.animposx").mapNotNull { it.toSearchResult() }
+            doc.select("div.animposx, article.animepost div.animposx, .relat .animposx")
+                .mapNotNull { it.toSearchResult() }
+                .ifEmpty { doc.select("div.animposx").mapNotNull { it.toSearchResult() } }
         }
         return newHomePageResponse(
             listOf(HomePageList(request.name, homeList, isHorizontalImages = isLatest)),
@@ -68,23 +73,46 @@ class SamehadakuProvider : MainAPI() {
     private fun Element.toSearchResult(): AnimeSearchResponse? {
         val a         = selectFirst("a") ?: return null
         val title     = selectFirst("div.data div.title h2")?.text()?.trim()
+                     ?: selectFirst("h2")?.text()?.trim()
+                     ?: selectFirst(".title h2")?.text()?.trim()
                      ?: a.attr("title").takeIf { it.isNotBlank() } ?: return null
         val href      = fixUrlNull(a.attr("href")) ?: return null
-        val posterUrl = fixUrlNull(selectFirst("div.content-thumb img")?.attr("src"))
-        val statusText = selectFirst("div.data > div.type")?.text()?.trim() ?: ""
+        val posterUrl = fixUrlNull(
+            selectFirst("div.content-thumb img")?.attr("src")
+                ?: selectFirst("img.anmsa")?.attr("src")
+                ?: selectFirst("img[itemprop=image]")?.attr("src")
+                ?: a.selectFirst("img")?.attr("src")
+        )
+        val statusText = selectFirst("div.data > div.type")?.text()?.trim()
+            ?: selectFirst(".data .type")?.text()?.trim()
+            ?: ""
         return newAnimeSearchResponse(title, href, TvType.Anime) {
             this.posterUrl = posterUrl
-            addDubStatus(statusText)
+            if (statusText.isNotBlank()) addDubStatus(statusText)
         }
     }
 
     private fun Element.toLatestAnimeResult(): AnimeSearchResponse? {
-        val a         = selectFirst("div.thumb a") ?: return null
-        val title     = selectFirst("h2.entry-title a")?.text()?.trim()
-                     ?: a.attr("title").takeIf { it.isNotBlank() } ?: return null
-        val href      = fixUrlNull(a.attr("href")) ?: return null
-        val posterUrl = fixUrlNull(a.selectFirst("img")?.attr("src"))
-        val epNum     = selectFirst("div.dtla span author[itemprop=name]")?.text()?.toIntOrNull()
+        val thumb = selectFirst("div.thumb") ?: this
+        val a     = thumb.selectFirst("a") ?: selectFirst("h2.entry-title a") ?: selectFirst("a[itemprop=url]") ?: return null
+        val title = selectFirst("h2.entry-title a")?.text()?.trim()
+                  ?: selectFirst(".entry-title")?.text()?.trim()
+                  ?: a.attr("title").takeIf { it.isNotBlank() } ?: return null
+        val href  = fixUrlNull(a.attr("href")) ?: return null
+        val posterUrl = fixUrlNull(
+            thumb.selectFirst("img")?.attr("src")
+                ?: selectFirst("img")?.attr("src")
+        )
+        var epNum: Int? = null
+        select("span").forEach { span ->
+            val text = span.text()
+            if (text.contains("Episode", true)) {
+                epNum = episodeNumRegex.find(text)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            }
+        }
+        if (epNum == null) {
+            epNum = selectFirst("div.dtla span author[itemprop=name]")?.text()?.toIntOrNull()
+        }
         return newAnimeSearchResponse(title, href, TvType.Anime) {
             this.posterUrl = posterUrl
             addSub(epNum)
@@ -94,38 +122,87 @@ class SamehadakuProvider : MainAPI() {
     // ================== Search ==================
 
     override suspend fun search(query: String): List<SearchResponse> {
-        return app.get("$mainUrl/?s=$query").document
-            .select("div.animposx")
-            .mapNotNull { it.toSearchResult() }
+        return runCatching {
+            val doc = app.get("$mainUrl/?s=$query").document
+            val results = doc.select("div.animposx, article.animepost div.animposx, .animepost div.animposx")
+                .mapNotNull { it.toSearchResult() }
+            if (results.isNotEmpty()) results
+            else doc.select("li[itemtype='http://schema.org/CreativeWork'], li[itemtype='https://schema.org/CreativeWork']")
+                .mapNotNull { it.toLatestAnimeResult() }
+        }.getOrDefault(emptyList())
     }
 
     // ================== Load ==================
 
     override suspend fun load(url: String): LoadResponse? {
-        val fixUrl = if (url.contains("/anime/")) url
-                     else app.get(url).document.selectFirst("div.nvs.nvsc a")?.attr("href") ?: url
-        val doc    = app.get(fixUrl).document
+        var fixUrl = url
+        if (!url.contains("/anime/")) {
+            runCatching {
+                val d = app.get(url).document
+                val animeLink = d.selectFirst("a[href*='/anime/']")?.attr("href")
+                val nvsLink   = d.selectFirst("div.nvs.nvsc a")?.attr("href")
+                fixUrl = fixUrlNull(animeLink).takeIf { !it.isNullOrBlank() }
+                    ?: fixUrlNull(nvsLink).takeIf { !it.isNullOrBlank() }
+                    ?: url
+            }
+        }
+        val doc = app.get(fixUrl).document
 
-        val rawTitle = doc.selectFirst("h1.entry-title")?.text() ?: return null
-        val title    = rawTitle
-            .replace(Regex("(?i)(Nonton|Anime|Subtitle\\s+Indonesia|Sub\\s+Indo|Lengkap|Batch)"), "")
+        val rawTitle = doc.selectFirst("h1[itemprop=headline]")?.text()
+            ?: doc.selectFirst("h1.entry-title")?.text()
+            ?: doc.selectFirst(".card h1")?.text()
+            ?: return null
+        val title = rawTitle
+            .replace(Regex("(?i)(Nonton\\s+Streaming\\s+Anime\\s+|Download\\s+|Nonton\\s+|Anime\\s+|Subtitle\\s+Indonesia|Sub\\s+Indo|Lengkap|Batch)"), "")
+            .replace(Regex("\\s+"), " ")
             .trim()
 
-        val poster      = doc.selectFirst("div.thumb > img")?.attr("src")
-        val tags        = doc.select("div.genre-info > a").map { it.text() }
-        val year        = yearRegex.find(doc.select("div.spe > span:contains(Rilis)").text())
-                            ?.groupValues?.get(1)?.toIntOrNull()
-        val statusStr   = doc.selectFirst("div.spe > span:contains(Status)")
-                            ?.ownText()?.replace(":", "")?.trim() ?: "Completed"
-        val type        = getType(
-            doc.selectFirst("div.spe > span:contains(Type)")
-                ?.ownText()?.replace(":", "")?.trim()?.lowercase() ?: "tv"
-        )
-        val rating      = doc.selectFirst("span.ratingValue, div.rating strong")
-                            ?.text()?.replace("Rating", "")?.trim()?.toDoubleOrNull()
-        val description = doc.select("div.desc p, div.entry-content p").text().trim()
-        val trailer     = doc.selectFirst("div.trailer-anime iframe")?.attr("src")
+        val poster = doc.selectFirst(".w-48 img")?.attr("src")
+            ?: doc.selectFirst("div.thumb > img")?.attr("src")
+            ?: doc.selectFirst("img.object-cover")?.attr("src")
+            ?: doc.selectFirst(".infoanime .thumb img")?.attr("src")
 
+        val tags = doc.select("div.genre-info > a, .flex.items-center.gap-1\\.5.flex-wrap a[href*='/genre/']").map { it.text().trim() }.filter { it.isNotBlank() }.distinct()
+
+        var year: Int? = null
+        var statusStr = "Completed"
+        var typeStr = "tv"
+        var rating: Double? = null
+        var japName: String? = null
+        var engName: String? = null
+
+        doc.select(".card .grid > div, .grid.grid-cols-1 > div").forEach { row ->
+            val label = row.selectFirst("span")?.text()?.lowercase() ?: return@forEach
+            val value = row.select("span").lastOrNull()?.text()?.trim() ?: return@forEach
+            when {
+                label.contains("japanese") -> japName = value
+                label.contains("english")  -> engName = value
+                label.contains("status")   -> statusStr = value
+                label.contains("type")     -> typeStr = value.lowercase()
+                label.contains("rilis") || label.contains("released") -> year = yearRegex.find(value)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                label.contains("tahun")    -> year = year ?: value.filter { it.isDigit() }.take(4).toIntOrNull()
+            }
+        }
+        if (year == null) {
+            year = yearRegex.find(doc.select("div.spe > span:contains(Rilis), .infox").text())?.groupValues?.getOrNull(1)?.toIntOrNull()
+        }
+        if (statusStr == "Completed") {
+            doc.selectFirst("div.spe > span:contains(Status)")?.ownText()?.replace(":", "")?.trim()?.let { if (it.isNotBlank()) statusStr = it }
+        }
+        if (typeStr == "tv") {
+            doc.selectFirst("div.spe > span:contains(Type)")?.ownText()?.replace(":", "")?.trim()?.lowercase()?.let { if (it.isNotBlank()) typeStr = it }
+        }
+
+        rating = doc.selectFirst("span.ratingValue, div.rating strong")?.text()?.replace("Rating", "")?.trim()?.toDoubleOrNull()
+            ?: doc.select(".score").firstOrNull()?.text()?.replace("*", "")?.trim()?.toDoubleOrNull()
+
+        val description = doc.select("div.entry-content.entry-content-single p, div.desc p, div.entry-content p")
+            .joinToString("\n") { it.text().trim() }
+            .trim()
+
+        val trailer = doc.selectFirst("div.trailer-anime iframe")?.attr("src")
+
+        val type = getType(typeStr)
         val tracker = APIHolder.getTracker(listOf(title), TrackerType.getTypes(type), year, true)
         val meta    = fetchAniZipMeta(tracker?.malId)
         val logoUrl = fetchTmdbLogoUrl(type, meta?.tmdbId, "en")
@@ -133,13 +210,35 @@ class SamehadakuProvider : MainAPI() {
         val backgroundPoster = meta?.data?.images?.find { it.coverType == "Fanart" }?.url
                             ?: tracker?.cover
 
-        val episodes = doc.select("div.lstepsiode.listeps ul li").amap { el ->
-            val header = el.selectFirst("span.lchx > a") ?: return@amap null
-            val name   = header.text()
+        val episodeElements = mutableListOf<Element>()
+        val seenEpisodeLinks = mutableSetOf<String>()
+        doc.select(".max-h-\\[520px\\] .flex.items-center.gap-3, .listeps ul li, div.lstepsiode.listeps ul li, .episode-lainnya ul li").forEach { el ->
+            val link = el.selectFirst("a[href*='-episode-'], a[href*='/episode']")?.attr("href")
+                ?: el.selectFirst("h4 a")?.attr("href")
+                ?: el.selectFirst(".lchx a")?.attr("href")
+            if (!link.isNullOrBlank()) {
+                val fixed = fixUrl(link)
+                if (seenEpisodeLinks.add(fixed)) {
+                    episodeElements.add(el)
+                }
+            }
+        }
+        if (episodeElements.isEmpty()) {
+            doc.select("a[href*='-episode-']").forEach { a ->
+                val fixed = fixUrl(a.attr("href"))
+                if (seenEpisodeLinks.add(fixed)) {
+                    a.parents().firstOrNull { it.tagName() == "div" || it.tagName() == "li" }?.let { episodeElements.add(it) }
+                }
+            }
+        }
+
+        val episodes = episodeElements.amap { el ->
+            val header = el.selectFirst("a[href*='-episode-'], h4 a, .lchx a, a") ?: return@amap null
+            val link   = fixUrl(header.attr("href"))
+            val name   = header.text().ifBlank { el.selectFirst("h4")?.text() ?: el.text() }
             var epNum  = episodeNumRegex.find(name)?.groupValues?.getOrNull(1)?.toIntOrNull()
             if (type == TvType.AnimeMovie && epNum == null) epNum = 1
 
-            val link  = fixUrl(header.attr("href"))
             val aniEp = epNum?.let { meta?.data?.episodes?.get(it.toString()) }
 
             newEpisode(link) {
@@ -150,32 +249,42 @@ class SamehadakuProvider : MainAPI() {
                 }
                 this.episode     = epNum
                 this.score       = Score.from10(aniEp?.rating)
-                this.posterUrl   = aniEp?.image ?: meta?.data?.images?.firstOrNull()?.url ?: ""
+                this.posterUrl   = aniEp?.image ?: meta?.data?.images?.firstOrNull()?.url ?: poster ?: ""
                 this.description = aniEp?.overview?.takeIf { it.isNotBlank() } ?: "Synopsis not yet available."
                 this.addDate(aniEp?.airDateUtc)
                 this.runTime     = aniEp?.runtime
             }
-        }.filterNotNull().reversed()
-
-        val recommendations = doc.select("ul li a.series").mapNotNull { a ->
-            val recTitle  = a.selectFirst("span.judul")?.text()?.trim() ?: return@mapNotNull null
-            val recHref   = a.attr("href").takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            val recPoster = fixUrlNull(a.selectFirst("img")?.attr("src"))
-            val recEpNum  = Regex("""\d+""").find(a.selectFirst("span.episode")?.text() ?: "")
-                                ?.value?.toIntOrNull()
-            newAnimeSearchResponse(recTitle, recHref, TvType.Anime) {
-                this.posterUrl = recPoster
-                addSub(recEpNum)
-            }
+        }.filterNotNull().let { list ->
+            if (list.size > 1) list.reversed() else list
         }
+
+        val recommendations = doc.select(".recom-section .animposx, ul li a.series, .relat .animposx")
+            .mapNotNull { el ->
+                if (el.tagName() == "a" && el.hasClass("series")) {
+                    val recTitle  = el.selectFirst("span.judul")?.text()?.trim() ?: el.text().trim()
+                    val recHref   = el.attr("href").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                    val recPoster = fixUrlNull(el.selectFirst("img")?.attr("src"))
+                    val recEpNum  = Regex("""\d+""").find(el.selectFirst("span.episode")?.text() ?: "")?.value?.toIntOrNull()
+                    if (recTitle.isBlank()) return@mapNotNull null
+                    newAnimeSearchResponse(recTitle, recHref, TvType.Anime) {
+                        this.posterUrl = recPoster
+                        addSub(recEpNum)
+                    }
+                } else {
+                    val res = el.toSearchResult()
+                    res
+                }
+            }
+            .filter { it.name.isNotBlank() }
 
         val finalPlot = meta?.data?.description?.replace(Regex("<.*?>"), "")
                      ?: meta?.data?.episodes?.get("1")?.overview?.takeIf { it.isNotBlank() }
                      ?: description
+                     ?: ""
 
-        return newAnimeLoadResponse(title, url, TvType.Anime) {
-            this.engName             = meta?.data?.titles?.get("en") ?: title
-            this.japName             = meta?.data?.titles?.get("ja") ?: meta?.data?.titles?.get("x-jat")
+        return newAnimeLoadResponse(title, fixUrl, TvType.Anime) {
+            this.engName             = engName ?: meta?.data?.titles?.get("en") ?: title
+            this.japName             = japName ?: meta?.data?.titles?.get("ja") ?: meta?.data?.titles?.get("x-jat")
             this.posterUrl           = tracker?.image ?: poster
             this.backgroundPosterUrl = backgroundPoster
             runCatching { this.logoUrl = logoUrl }
@@ -208,20 +317,25 @@ class SamehadakuProvider : MainAPI() {
         doc.select("div#downloadb li").amap { li ->
             val quality = li.selectFirst("strong")?.text()?.trim() ?: ""
             li.select("a[href]").amap { a ->
-                loadFixedExtractor(fixUrl(a.attr("href")), quality, "$mainUrl/", subtitleCallback, callback)
+                val href = a.attr("href")
+                if (href.isNotBlank()) {
+                    loadFixedExtractor(fixUrl(href), quality, "$mainUrl/", subtitleCallback, callback)
+                }
             }
         }
 
-        // Streams
-        doc.select("div.east_player_option[data-post][data-nume]").amap { btn ->
-            val postId = btn.attr("data-post").takeIf { it.isNotBlank() } ?: return@amap
-            val nume   = btn.attr("data-nume").takeIf { it.isNotBlank() } ?: return@amap
-            val type   = btn.attr("data-type").takeIf { it.isNotBlank() } ?: return@amap
-            val label  = btn.selectFirst("span")?.text()?.trim() ?: "Mirror $nume"
-
-            val iframeUrl = fetchStreamIframe(postId, nume, type) ?: return@amap
-
-            if (isDirectVideoUrl(iframeUrl) || iframeUrl.contains("wibufile.com", ignoreCase = true)) {
+        // Streams - Prefer data-embed (new theme)
+        var foundStream = false
+        doc.select(".east_player_option[data-embed], .player-server-btn[data-embed]").forEach { btn ->
+            val embedHtml = unescapeHtml(btn.attr("data-embed"))
+            if (embedHtml.isBlank()) return@forEach
+            val iframeUrl = Regex("""src=["']([^"']+)["']""").find(embedHtml)?.groupValues?.get(1)
+                ?: return@forEach
+            val label = btn.selectFirst("span")?.text()?.trim().takeIf { !it.isNullOrBlank() }
+                ?: btn.text().trim().takeIf { it.isNotBlank() }
+                ?: "Mirror"
+            foundStream = true
+            if (isDirectVideoUrl(iframeUrl) || iframeUrl.contains("wibufile.com", ignoreCase = true) || iframeUrl.contains("blogger.com", ignoreCase = true)) {
                 callback(
                     newExtractorLink(label, label, iframeUrl, ExtractorLinkType.VIDEO) {
                         this.referer = "$mainUrl/"
@@ -233,20 +347,57 @@ class SamehadakuProvider : MainAPI() {
             }
         }
 
+        if (!foundStream) {
+            // Streams - Legacy AJAX
+            doc.select("div.east_player_option[data-post][data-nume]").amap { btn ->
+                val postId = btn.attr("data-post").takeIf { it.isNotBlank() } ?: return@amap
+                val nume   = btn.attr("data-nume").takeIf { it.isNotBlank() } ?: return@amap
+                val type   = btn.attr("data-type").takeIf { it.isNotBlank() } ?: "schtml"
+                val label  = btn.selectFirst("span")?.text()?.trim() ?: "Mirror $nume"
+
+                val iframeUrl = fetchStreamIframe(postId, nume, type) ?: return@amap
+
+                if (isDirectVideoUrl(iframeUrl) || iframeUrl.contains("wibufile.com", ignoreCase = true)) {
+                    callback(
+                        newExtractorLink(label, label, iframeUrl, ExtractorLinkType.VIDEO) {
+                            this.referer = "$mainUrl/"
+                            this.quality = label.parseQualityLabel()
+                        }
+                    )
+                } else {
+                    loadFixedExtractor(iframeUrl, label, "$mainUrl/", subtitleCallback, callback)
+                }
+            }
+        }
+
         return true
     }
 
     // ================== Helpers ==================
+
+    private fun unescapeHtml(text: String): String {
+        if (text.isBlank()) return text
+        return text
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&#039;", "'")
+            .replace("&#39;", "'")
+            .replace("&amp;", "&")
+            .replace("&#038;", "&")
+            .replace("\\\"", "\"")
+            .replace("\\/", "/")
+    }
 
     private suspend fun fetchStreamIframe(postId: String, nume: String, type: String): String? =
         runCatching {
             val response = app.post(
                 "$mainUrl/wp-admin/admin-ajax.php",
                 data    = mapOf("action" to "player_ajax", "post" to postId, "nume" to nume, "type" to type),
-                headers = mapOf("X-Requested-With" to "XMLHttpRequest", "Referer" to mainUrl)
+                headers = mapOf("X-Requested-With" to "XMLHttpRequest", "Referer" to "$mainUrl/")
             ).text
             val raw   = runCatching { mapper.readTree(response)?.get("embed")?.asText() }.getOrNull() ?: response
-            val embed = raw.replace("\\\"", "\"").replace("\\/", "/")
+            val embed = unescapeHtml(raw)
             Regex("""src=["']([^"']+)["']""").find(embed)?.groupValues?.get(1)
         }.getOrNull()
 
