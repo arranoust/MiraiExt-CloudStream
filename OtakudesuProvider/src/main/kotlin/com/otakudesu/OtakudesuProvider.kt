@@ -112,8 +112,9 @@ class OtakudesuProvider : MainAPI() {
             if (type == TvType.AnimeMovie && epNum == null) epNum = 1
             val aniEp = matchAniEpisode(epNum, epName, index, aniEpisodes)
 
+            val aniTitle = pickAniZipTitle(aniEp?.value?.title)
             newEpisode(link) {
-                this.name = if (type == TvType.AnimeMovie) title else epName
+                this.name = if (type == TvType.AnimeMovie) (aniTitle ?: title) else (aniTitle ?: epName)
                 this.episode = epNum ?: aniEp?.key?.toIntOrNull()
                 this.posterUrl = aniEp?.value?.image ?: meta?.data?.images?.firstOrNull()?.url ?: ""
                 this.description = aniEp?.value?.overview?.takeIf { it.isNotBlank() }
@@ -151,6 +152,16 @@ class OtakudesuProvider : MainAPI() {
             addAniListId(tracker?.aniId?.toIntOrNull())
             runCatching { addKitsuId(meta?.kitsuId) }
         }
+    }
+
+    private fun pickAniZipTitle(titles: Map<String, String>?): String? {
+        titles ?: return null
+        val preferredKeys = listOf("en", "x-jat", "ja", "id", "romaji", "jp")
+        for (k in preferredKeys) {
+            val v = titles[k]?.trim()
+            if (!v.isNullOrBlank()) return v
+        }
+        return titles.values.firstOrNull { it.isNotBlank() }?.trim()
     }
 
     private fun matchAniEpisode(

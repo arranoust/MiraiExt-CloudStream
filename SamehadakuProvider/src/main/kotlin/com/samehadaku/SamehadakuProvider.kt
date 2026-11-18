@@ -222,7 +222,8 @@ class SamehadakuProvider : MainAPI() {
             }
         }
 
-        val episodes = episodeElements.amap { el ->
+        val aniEpisodes = meta?.data?.episodes ?: emptyMap()
+        val episodes = episodeElements.mapIndexed { i, e -> i to e }.amap { (index, el) ->
             val titleAnchor = el.selectFirst("h4 a[href], .lchx a[href], .epl-title a[href]")
                 ?: el.selectFirst("a[href*='-episode-'], a[href*='/episode'], a[href]")
             val href = titleAnchor?.attr("href")?.takeIf { it.isNotBlank() }
@@ -245,17 +246,18 @@ class SamehadakuProvider : MainAPI() {
             }
             if (type == TvType.AnimeMovie && epNum == null) epNum = 1
 
-            val aniEp = epNum?.let { meta?.data?.episodes?.get(it.toString()) }
-            val episodeName = if (type == TvType.AnimeMovie) title else siteName
+            val aniEp = matchAniEpisode(epNum, siteName, index, aniEpisodes)
+            val aniTitle = pickAniZipTitle(aniEp?.value?.title)
+            val episodeName = if (type == TvType.AnimeMovie) (aniTitle ?: title) else (aniTitle ?: siteName)
 
             newEpisode(link) {
                 this.name = episodeName
-                this.episode = epNum
-                this.score = Score.from10(aniEp?.rating)
-                this.posterUrl = aniEp?.image ?: meta?.data?.images?.firstOrNull()?.url ?: poster
-                this.description = aniEp?.overview?.takeIf { it.isNotBlank() } ?: "Synopsis not yet available."
-                this.addDate(aniEp?.airDateUtc)
-                this.runTime = aniEp?.runtime
+                this.episode = epNum ?: aniEp?.key?.toIntOrNull()
+                this.score = Score.from10(aniEp?.value?.rating)
+                this.posterUrl = aniEp?.value?.image ?: meta?.data?.images?.firstOrNull()?.url ?: poster
+                this.description = aniEp?.value?.overview?.takeIf { it.isNotBlank() } ?: "Synopsis not yet available."
+                this.addDate(aniEp?.value?.airDateUtc)
+                this.runTime = aniEp?.value?.runtime
             }
         }.filterNotNull().let { list ->
             if (list.size > 1) list.reversed() else list
@@ -437,6 +439,31 @@ class SamehadakuProvider : MainAPI() {
                         .lastOrNull()?.groupValues?.get(1)?.toIntOrNull()
                     ?: Qualities.Unknown.value
         }
+    }
+
+    private fun pickAniZipTitle(titles: Map<String, String>?): String? {
+        titles ?: return null
+        val preferredKeys = listOf("en", "x-jat", "ja", "id", "romaji", "jp")
+        for (k in preferredKeys) {
+            val v = titles[k]?.trim()
+            if (!v.isNullOrBlank()) return v
+        }
+        return titles.values.firstOrNull { it.isNotBlank() }?.trim()
+    }
+
+    private fun matchAniEpisode(
+        epNum: Int?,
+        name: String?,
+        index: Int,
+        episodes: Map<String, MetaEpisode>
+    ): Map.Entry<String, MetaEpisode>? {
+        if (episodes.isEmpty()) return null
+        epNum?.toString()?.let { key -> episodes[key]?.let { return java.util.AbstractMap.SimpleEntry(key, it) } }
+        name?.let { n ->
+            episodes.entries.firstOrNull { (_, v) -> v.title?.values?.any { it.equals(n, true) } == true }?.let { return it }
+        }
+        val byOrder = episodes.entries.sortedBy { it.key.toIntOrNull() ?: Int.MAX_VALUE }
+        return byOrder.getOrNull(index)
     }
 
     private data class AniZipMeta(val data: MetaAnimeData, val tmdbId: Int?, val kitsuId: String?)

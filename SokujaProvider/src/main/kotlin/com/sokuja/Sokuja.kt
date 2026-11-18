@@ -10,109 +10,137 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addKitsuId
 import com.lagradost.cloudstream3.LoadResponse.Companion.addMalId
 import com.lagradost.cloudstream3.utils.*
 import org.json.JSONObject
-import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URLDecoder
 
 class SokujaProvider : MainAPI() {
-    override var mainUrl            = "https://x6.sokuja.uk"
-    override var name               = "Sokuja"
-    override val hasMainPage        = true
-    override var lang               = "id"
+    override var mainUrl = "https://x6.sokuja.uk"
+    override var name = "Sokuja"
+    override val hasMainPage = true
+    override var lang = "id"
     override val hasDownloadSupport = true
-    override val supportedTypes     = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
+    override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
 
     companion object {
         var context: android.content.Context? = null
-        private const val UA         = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-        private val mapper           = ObjectMapper()
-        private val episodeNumRegex  = Regex("""Episode\s*(\d+(?:\.\d+)?)""", RegexOption.IGNORE_CASE)
-        private val yearRegex        = Regex("""\b(19|20)\d{2}\b""")
-        private val nextImageRegex   = Regex("""[?&]url=([^&]+)""")
+        private const val UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        private val mapper = ObjectMapper()
+        private val episodeNumRegex = Regex("""Episode\s*(\d+(?:\.\d+)?)""", RegexOption.IGNORE_CASE)
+        private val yearRegex = Regex("""\b(19|20)\d{2}\b""")
+        private val nextImageRegex = Regex("""[?&]url=([^&]+)""")
     }
 
+    private val headers get() = mapOf("User-Agent" to UA)
+
     override val mainPage = mainPageOf(
-        "$mainUrl/"                                             to "Terbaru",
-        "$mainUrl/anime/?status=ongoing&order=update&page=%d"   to "Ongoing Anime",
+        "$mainUrl/anime/?status=ongoing&order=update&page=%d" to "Ongoing Anime",
         "$mainUrl/anime/?status=completed&order=update&page=%d" to "Completed Anime",
-        "$mainUrl/anime/?type=Movie&order=update&page=%d"       to "Movies",
+        "$mainUrl/anime/?type=Movie&order=update&page=%d" to "Movies",
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         context?.let { PopupHelper.showPopupIfNeeded(it) }
-        val url = if ("%d" in request.data) request.data.replace("%d", page.toString()) else request.data
-        if (request.data == "$mainUrl/" && page > 1) {
-            return newHomePageResponse(request.name, emptyList())
-        }
-        val doc = app.get(url, headers = mapOf("User-Agent" to UA)).document
-        val items = if (request.data == "$mainUrl/") {
-            parseHomeItems(doc)
-        } else {
-            doc.select("a.group.block").mapNotNull { it.toSearchResult() }
-                .filter { it.url.contains("/anime/") }
-                .distinctBy { it.url }
+        val doc = app.get(request.data.replace("%d", page.toString()), headers = headers).document
+        val items = parseAnimeCards(doc)
+        if (page == 1) {
+            val homeDoc = runCatching { app.get(mainUrl, headers = headers).document }.getOrNull()
+            val latest = homeDoc?.let { parseLatestEpisodeItems(it) } ?: emptyList()
+            val lists = buildList {
+                if (latest.isNotEmpty()) add(HomePageList("Update Terbaru", latest, isHorizontalImages = true))
+                add(HomePageList(request.name, items))
+            }
+            return newHomePageResponse(lists, hasNext = items.isNotEmpty())
         }
         return newHomePageResponse(request.name, items)
     }
 
-    private fun parseHomeItems(doc: Document): List<SearchResponse> {
-        val items = LinkedHashMap<String, SearchResponse>()
+    private fun parseAnimeCards(doc: Document): List<SearchResponse> {
+        return doc.select("a.group.block").mapNotNull { a ->
+            val href = a.attr("href").takeIf { it.contains("/anime/") } ?: return@mapNotNull null
+            a.toAnimeSearchResult(fixUrl(href))
+        }.distinctBy { it.url }
+    }
 
-        fun addAnimeResult(a: Element) {
-            val href = a.attr("href").takeIf { it.contains("/anime/") } ?: return
-            val title = a.selectFirst("h3, h4, .title")?.text()?.trim()?.takeIf { it.isNotBlank() }
-                ?: a.selectFirst("img")?.attr("alt")?.trim()?.takeIf { it.isNotBlank() }
-                ?: return
-            val fixed = fixUrl(href)
-            if (items.containsKey(fixed)) return
-            val typeText = a.selectFirst("span.absolute.left-2, .type")?.text() ?: ""
+    private fun parseLatestEpisodeItems(doc: Document): List<SearchResponse> {
+        val items = LinkedHashMap<String, SearchResponse>()
+        doc.select("a.group.block[href*='-episode-'][href*='subtitle-indonesia']").forEach { a ->
+            val href = a.attr("href").takeIf { it.isNotBlank() } ?: return@forEach
+            val fixed = fixUrl(href.substringBefore("?"))
+            if (items.containsKey(fixed)) return@forEach
+            val title = a.selectFirst("h3")?.text()?.trim()
+                ?: a.selectFirst("img")?.attr("alt")?.trim()
+                ?: return@forEach
+            val poster = a.selectFirst("img")?.extractNextImageUrl()
+            val typeText = a.select("span").map { it.text() }
+                .firstOrNull { it.equals("TV", true) || it.equals("Movie", true) || it.contains("OVA", true) || it.contains("ONA", true) }
+                ?: ""
+            val epNum = a.select("span").firstNotNullOfOrNull { span ->
+                Regex("""\bEP\s*(\d+)""", RegexOption.IGNORE_CASE).find(span.text())?.groupValues?.getOrNull(1)?.toIntOrNull()
+            } ?: episodeNumRegex.find(a.text())?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.toInt()
+
             items[fixed] = newAnimeSearchResponse(title, fixed, getType(typeText)) {
-                this.posterUrl = a.selectFirst("img")?.extractNextImageUrl()
+                this.posterUrl = poster
+                addSub(epNum)
             }
         }
-
-        doc.select("a[href*='/anime/']").forEach { addAnimeResult(it) }
         return items.values.toList()
     }
 
-    private fun Element.toSearchResult(): AnimeSearchResponse? {
-        val href = attr("href").takeIf { it.isNotBlank() } ?: return null
+    private fun Element.toAnimeSearchResult(fixedHref: String? = null): AnimeSearchResponse? {
+        val href = fixedHref ?: attr("href").takeIf { it.isNotBlank() }?.let { fixUrl(it) } ?: return null
         val title = selectFirst("h3")?.text()?.trim()
+            ?: selectFirst("h4")?.text()?.trim()
             ?: selectFirst("img")?.attr("alt")?.trim()
             ?: return null
-        val typeText = selectFirst("span.absolute.left-2")?.text() ?: ""
-        return newAnimeSearchResponse(title, fixUrl(href), getType(typeText)) {
+        val typeText = selectFirst("span.absolute.left-2")?.text()
+            ?: select("span").map { it.text() }.firstOrNull { it in setOf("TV", "Movie", "OVA", "ONA", "Special") }
+            ?: ""
+        return newAnimeSearchResponse(title, href, getType(typeText)) {
             this.posterUrl = selectFirst("img")?.extractNextImageUrl()
         }
     }
 
-    override suspend fun search(query: String): List<SearchResponse> =
-        app.get("$mainUrl/", params = mapOf("s" to query), headers = mapOf("User-Agent" to UA))
-            .document.select("a.group.block, a[href*='/anime/']").mapNotNull {
-                val href = it.attr("href")
-                if (!href.contains("/anime/")) null else it.toSearchResult()
-            }.distinctBy { it.url }
+    override suspend fun search(query: String): List<SearchResponse> {
+        val doc = app.get("$mainUrl/", params = mapOf("s" to query), headers = headers).document
+        return doc.select("a.group.block, a[href*='/anime/']").mapNotNull { a ->
+            val href = a.attr("href")
+            if (!href.contains("/anime/")) null else a.toAnimeSearchResult(fixUrl(href))
+        }.distinctBy { it.url }
+    }
 
     override suspend fun load(url: String): LoadResponse? {
-        val headers = mapOf("User-Agent" to UA)
-        val doc = app.get(url, headers = headers).document
-        val rscText = runCatching { app.get(url, headers = headers + ("RSC" to "1")).text }.getOrDefault("")
+        val initial = app.get(url, headers = headers)
+        var doc = initial.document
+        var finalUrl = initial.url.ifBlank { url }
+        var rscText = runCatching { app.get(finalUrl, headers = headers + ("RSC" to "1")).text }.getOrDefault("")
+        var pageText = doc.outerHtml()
 
-        val jsonLd = findTvSeriesJsonLd(doc)
+        if (isEpisodePage(finalUrl, doc)) {
+            val animeUrl = findAnimeUrlFromEpisode(doc, pageText, rscText)
+            if (animeUrl != null) {
+                finalUrl = fixUrl(animeUrl)
+                doc = app.get(finalUrl, headers = headers).document
+                rscText = runCatching { app.get(finalUrl, headers = headers + ("RSC" to "1")).text }.getOrDefault("")
+                pageText = doc.outerHtml()
+            }
+        }
+
+        val jsonLd = findJsonLd(doc, "TVSeries") ?: findJsonLd(doc, "Movie")
         val rawTitle = doc.selectFirst("h1")?.text()?.trim()?.takeIf { it.isNotBlank() }
             ?: jsonLd?.optString("name")?.takeIf { it.isNotBlank() }
             ?: doc.selectFirst("meta[property=og:title]")?.attr("content")?.trim()?.takeIf { it.isNotBlank() }
-            ?: doc.selectFirst("title")?.text()?.substringBefore(" -")?.trim()?.takeIf { it.isNotBlank() }
+            ?: doc.selectFirst("title")?.text()?.substringBefore("|")?.substringBefore("-")?.trim()?.takeIf { it.isNotBlank() }
             ?: return null
         val title = rawTitle
             .replace(Regex("(?i)\\s*Sub(?:title)?\\s*Indo(?:nesia)?"), "")
+            .replace(Regex("(?i)^Nonton\\s+"), "")
             .replace(Regex("\\s+"), " ")
             .trim()
             .ifBlank { rawTitle.trim() }
 
         val infoMap = buildInfoMap(doc)
-        val typeText = infoMap["Tipe"] ?: infoMap["Type"] ?: jsonLd?.optString("@type") ?: ""
+        val typeText = infoMap["Tipe"] ?: infoMap["Type"] ?: if (jsonLd?.optString("@type") == "Movie") "Movie" else ""
         val detectedType = getType(typeText)
         val year = yearRegex.find(infoMap["Tahun"] ?: infoMap["Year"] ?: infoMap["Rilis"] ?: infoMap["Musim"] ?: "")
             ?.value?.toIntOrNull()
@@ -147,12 +175,12 @@ class SokujaProvider : MainAPI() {
             }
             ?: jsonLd?.optString("image")?.takeIf { it.isNotBlank() }?.let(::fixUrlNull)
 
-        val siteEpisodes = parseEpisodesFromDom(doc)
-        val rscEpisodes = parseEpisodesFromRsc(rscText)
-        val mergedSiteEpisodes = if (rscEpisodes.isNotEmpty()) mergeEpisodes(siteEpisodes, rscEpisodes) else siteEpisodes
-        val episodes = buildEpisodes(mergedSiteEpisodes, detectedType, meta, title)
+        val domEpisodes = parseEpisodesFromDom(doc)
+        val payloadEpisodes = extractEpisodesFromText(pageText) + extractEpisodesFromText(rscText)
+        val mergedEpisodes = mergeEpisodes(domEpisodes, payloadEpisodes)
+        val episodes = buildEpisodes(mergedEpisodes, detectedType, meta, title)
 
-        return newAnimeLoadResponse(title, url, detectedType) {
+        return newAnimeLoadResponse(title, finalUrl, detectedType) {
             this.engName = meta?.data?.titles?.get("en") ?: title
             this.japName = meta?.data?.titles?.get("ja") ?: meta?.data?.titles?.get("x-jat")
             this.posterUrl = poster
@@ -171,7 +199,25 @@ class SokujaProvider : MainAPI() {
         }
     }
 
-    private data class SiteEpisode(val url: String, val name: String?, val number: Int?)
+    private fun isEpisodePage(url: String, doc: Document): Boolean {
+        if ("/anime/" in url) return false
+        if (url.contains("-episode-")) return true
+        return doc.selectFirst("meta[property=og:type]")?.attr("content") == "video.episode"
+    }
+
+    private fun findAnimeUrlFromEpisode(doc: Document, pageText: String, rscText: String): String? {
+        doc.select("a[href*='/anime/'][href*='subtitle-indonesia']").forEach { a ->
+            val href = a.attr("href")
+            if (href.isNotBlank() && !href.contains("-episode-")) return fixUrl(href)
+        }
+        val candidates = linkedSetOf<String>()
+        Regex("""/anime/[a-zA-Z0-9\-]+-subtitle-indonesia/?""")
+            .findAll(pageText + "\n" + rscText)
+            .forEach { candidates.add(it.value) }
+        return candidates.firstOrNull { !it.contains("-episode-") }?.let { fixUrl(it) }
+    }
+
+    private data class SiteEpisode(val url: String, val name: String?, val number: Int?, val id: Int? = null)
 
     private fun parseEpisodesFromDom(doc: Document): List<SiteEpisode> {
         val seen = linkedSetOf<String>()
@@ -180,91 +226,137 @@ class SokujaProvider : MainAPI() {
             val href = a.attr("href").takeIf { it.isNotBlank() } ?: return@forEach
             if (!href.contains("-episode-", true) || !href.contains("subtitle-indonesia", true)) return@forEach
             val fixed = fixUrl(href.substringBefore("?"))
-            if (!seen.add(fixed)) return@forEach
+            val key = episodeKey(fixed)
+            if (!seen.add(key)) return@forEach
             val name = a.selectFirst("span")?.text()?.trim()?.takeIf { it.isNotBlank() }
                 ?: a.text().trim().takeIf { it.isNotBlank() }
-            val num = name?.let { episodeNumRegex.find(it)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.toInt() }
-                ?: episodeNumRegex.find(href)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.toInt()
-                ?: Regex("""-episode-(\d+)""", RegexOption.IGNORE_CASE).find(href)?.groupValues?.getOrNull(1)?.toIntOrNull()
-            episodes.add(SiteEpisode(fixed, name, num))
+            episodes.add(SiteEpisode(fixed, name, parseEpisodeNumber(name, href)))
         }
         return episodes
     }
 
-    private fun parseEpisodesFromRsc(rscText: String): List<SiteEpisode> {
-        if (rscText.isBlank()) return emptyList()
-        val start = rscText.indexOf("\"episodes\":[")
-        if (start == -1) return emptyList()
-
-        var depth = 0
-        var end = start + 12
-        for (i in (start + 11) until rscText.length) {
-            when (rscText[i]) {
-                '[' -> depth++
-                ']' -> {
-                    depth--
-                    if (depth == 0) {
-                        end = i + 1
-                        break
-                    }
+    private fun extractEpisodesFromText(text: String): List<SiteEpisode> {
+        if (text.isBlank()) return emptyList()
+        val results = mutableListOf<SiteEpisode>()
+        Regex(""""episodes"\s*:\s*\[(.*?)]""", setOf(RegexOption.DOT_MATCHES_ALL))
+            .findAll(text)
+            .forEach { m -> results += parseEpisodesArrayJson(unescapeFlightString(m.groupValues[1]).let { "[$it]" }) }
+        Regex("""\\"episodes\\"\\s*:\\s*\[(.*?)]""", setOf(RegexOption.DOT_MATCHES_ALL))
+            .findAll(text)
+            .forEach { m ->
+                val unescaped = m.groupValues[1].replace("\\\"", "\"").replace("\\/", "/")
+                results += parseEpisodesArrayJson("[$unescaped]")
+            }
+        Regex("""\{[^{}]*"id"\s*:\s*(\d+)[^{}]*"slug"\s*:\s*"([^"]+episode[^"]*)"[^{}]*\}""")
+            .findAll(text.replace("\\\"", "\""))
+            .forEach { m ->
+                val id = m.groupValues[1].toIntOrNull()
+                val slug = m.groupValues[2]
+                val block = m.value
+                val title = Regex(""""title"\s*:\s*"([^"]*)"""").find(block)?.groupValues?.getOrNull(1)
+                val num = Regex(""""episodeNumber"\s*:\s*(\d+)""").find(block)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                if (slug.contains("-episode-", true)) {
+                    val url = if (id != null) "$mainUrl/$slug/?eid=$id" else "$mainUrl/$slug/"
+                    results += SiteEpisode(url, title, num ?: parseEpisodeNumber(title, slug), id)
                 }
             }
-        }
-        val arrayJson = rscText.substring(start + 11, end)
+        return results.distinctBy { episodeKey(it.url) }
+    }
+
+    private fun parseEpisodesArrayJson(arrayJson: String): List<SiteEpisode> {
         return runCatching {
-            mapper.readTree(arrayJson).mapNotNull { node ->
+            val normalized = unescapeFlightString(arrayJson)
+            mapper.readTree(normalized).mapNotNull { node ->
                 val slug = node.get("slug")?.asText()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                if (!slug.contains("-episode-", true)) return@mapNotNull null
                 val id = node.get("id")?.asInt()
                 val num = node.get("episodeNumber")?.asInt()?.takeIf { it > 0 }
+                    ?: node.get("episodeNumber")?.asText()?.toIntOrNull()
                 val name = node.get("title")?.asText()?.takeIf { it.isNotBlank() }
                 val epUrl = if (id != null) "$mainUrl/$slug/?eid=$id" else "$mainUrl/$slug/"
-                SiteEpisode(epUrl, name, num)
+                SiteEpisode(epUrl, name, num, id)
             }
         }.getOrDefault(emptyList())
     }
 
+    private fun unescapeFlightString(s: String): String {
+        return s
+            .replace("\\\"", "\"")
+            .replace("\\/", "/")
+            .replace("\\n", "\n")
+    }
+
+    private fun episodeKey(url: String): String = url.substringBefore("?").trimEnd('/').substringAfterLast("/")
+
     private fun mergeEpisodes(primary: List<SiteEpisode>, secondary: List<SiteEpisode>): List<SiteEpisode> {
-        val byUrl = LinkedHashMap<String, SiteEpisode>()
-        fun key(url: String) = url.substringBefore("?").trimEnd('/').substringAfterLast("/")
-        primary.forEach { byUrl[key(it.url)] = it }
+        val byKey = LinkedHashMap<String, SiteEpisode>()
+        primary.forEach { byKey[episodeKey(it.url)] = it }
         secondary.forEach { sec ->
-            val k = key(sec.url)
-            val cur = byUrl[k]
+            val k = episodeKey(sec.url)
+            val cur = byKey[k]
             if (cur == null) {
-                byUrl[k] = sec
+                byKey[k] = sec
             } else {
-                byUrl[k] = SiteEpisode(
-                    url = if (cur.url.contains("eid=")) cur.url else sec.url,
+                val id = cur.id ?: sec.id
+                val url = when {
+                    cur.url.contains("eid=") -> cur.url
+                    sec.url.contains("eid=") -> sec.url
+                    id != null -> "${cur.url.substringBefore("?").trimEnd('/')}/?eid=$id"
+                    else -> cur.url.substringBefore("?")
+                }
+                byKey[k] = SiteEpisode(
+                    url = url,
                     name = cur.name ?: sec.name,
-                    number = cur.number ?: sec.number
+                    number = cur.number ?: sec.number,
+                    id = id
                 )
             }
         }
-        return byUrl.values.toList()
+        return byKey.values.toList()
     }
 
     private fun buildEpisodes(siteEpisodes: List<SiteEpisode>, type: TvType, meta: AniZipMeta?, animeTitle: String): List<Episode> {
         val aniEpisodes = meta?.data?.episodes ?: emptyMap()
-        return siteEpisodes.mapIndexedNotNull { index, ep ->
-            val epNum = ep.number
-                ?: episodeNumRegex.find(ep.name ?: "")?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.toInt()
-                ?: episodeNumRegex.find(ep.url)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.toInt()
-                ?: Regex("""-episode-(\d+)""", RegexOption.IGNORE_CASE).find(ep.url)?.groupValues?.getOrNull(1)?.toIntOrNull()
-            val aniEp = matchAniEpisode(epNum, ep.name, index, aniEpisodes)
+        val episodes = siteEpisodes.mapIndexedNotNull { index, ep ->
+            val epNum = ep.number ?: parseEpisodeNumber(ep.name, ep.url)
+            val aniEntry = matchAniEpisode(epNum, ep.name, index, aniEpisodes)
+            val aniEp = aniEntry?.value
+            val aniTitle = pickAniZipTitle(aniEp?.title)
             val fallbackName = ep.name ?: epNum?.let { "Episode $it" } ?: "Episode ${index + 1}"
-            val displayName = when (type) {
-                TvType.AnimeMovie -> siteEpisodes.singleOrNull()?.let { animeTitle } ?: (ep.name ?: animeTitle)
-                else -> fallbackName
+            val displayName = if (type == TvType.AnimeMovie && siteEpisodes.size <= 1) {
+                aniTitle ?: animeTitle
+            } else {
+                aniTitle ?: fallbackName
             }
             newEpisode(ep.url) {
                 this.name = displayName
-                this.episode = epNum ?: aniEp?.key?.toIntOrNull()
-                this.posterUrl = aniEp?.value?.image ?: meta?.data?.images?.firstOrNull()?.url
-                this.description = aniEp?.value?.overview?.takeIf { it.isNotBlank() } ?: "Synopsis not yet available."
-                this.runTime = aniEp?.value?.runtime
-                this.addDate(aniEp?.value?.airDateUtc)
+                this.episode = epNum ?: aniEntry?.key?.toIntOrNull()
+                this.posterUrl = aniEp?.image ?: meta?.data?.images?.firstOrNull()?.url
+                this.description = aniEp?.overview?.takeIf { it.isNotBlank() } ?: "Synopsis not yet available."
+                this.runTime = aniEp?.runtime
+                this.addDate(aniEp?.airDateUtc)
             }
-        }.let { list -> if (list.size > 1) list.reversed() else list }
+        }
+        return if (episodes.size > 1) episodes.reversed() else episodes
+    }
+
+    private fun pickAniZipTitle(titles: Map<String, String>?): String? {
+        titles ?: return null
+        val preferredKeys = listOf("en", "x-jat", "ja", "id", "romaji", "jp")
+        for (k in preferredKeys) {
+            val v = titles[k]?.trim()
+            if (!v.isNullOrBlank()) return v
+        }
+        return titles.values.firstOrNull { it.isNotBlank() }?.trim()
+    }
+
+    private fun parseEpisodeNumber(name: String?, href: String?): Int? {
+        name?.let { episodeNumRegex.find(it)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.toInt() }?.let { return it }
+        href?.let {
+            episodeNumRegex.find(it)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.toInt()
+                ?: Regex("""-episode-(\d+)""", RegexOption.IGNORE_CASE).find(it)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        }?.let { return it }
+        return null
     }
 
     private fun matchAniEpisode(
@@ -288,18 +380,25 @@ class SokujaProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val headers = mapOf("User-Agent" to UA)
-        val episodeId = Regex("""[?&]eid=(\d+)""").find(data)?.groupValues?.get(1)
-            ?: runCatching {
-                val baseUrl = data.substringBefore("?")
-                val slug = baseUrl.trimEnd('/').substringAfterLast("/")
-                val rsc = app.get(baseUrl, headers = headers + ("RSC" to "1")).text
-                Regex(""""id"\s*:\s*(\d+)\s*,\s*"slug"\s*:\s*"${Regex.escape(slug)}"""")
-                    .find(rsc)?.groupValues?.get(1)
-                    ?: Regex(""""slug"\s*:\s*"${Regex.escape(slug)}"\s*,\s*"id"\s*:\s*(\d+)""")
-                        .find(rsc)?.groupValues?.get(1)
-            }.getOrNull()
+        val episodePage = runCatching { app.get(data, headers = headers + ("Referer" to mainUrl)).text }.getOrDefault("")
+        val episodeDoc = if (episodePage.isNotBlank()) org.jsoup.Jsoup.parse(episodePage, data) else null
+        val episodeRsc = runCatching { app.get(data, headers = headers + ("RSC" to "1")).text }.getOrDefault("")
+        val slug = data.substringBefore("?").trimEnd('/').substringAfterLast('/')
 
+        var episodeId = Regex("""[?&]eid=(\d+)""").find(data)?.groupValues?.get(1)
+            ?: findEpisodeIdInText(episodePage, slug)
+            ?: findEpisodeIdInText(episodeRsc, slug)
+
+        if (episodeId == null && episodeDoc != null) {
+            val animeUrl = findAnimeUrlFromEpisode(episodeDoc, episodePage, episodeRsc)
+            if (animeUrl != null) {
+                val animePage = runCatching { app.get(animeUrl, headers = headers).text }.getOrDefault("")
+                val animeRsc = runCatching { app.get(animeUrl, headers = headers + ("RSC" to "1")).text }.getOrDefault("")
+                episodeId = findEpisodeIdInText(animePage, slug) ?: findEpisodeIdInText(animeRsc, slug)
+            }
+        }
+
+        var emitted = false
         if (episodeId != null) {
             val mirrors = runCatching {
                 mapper.readValue(
@@ -311,47 +410,92 @@ class SokujaProvider : MainAPI() {
                     VideoMirrorsResponse::class.java
                 ).mirrors
             }.getOrDefault(emptyList())
-            if (mirrors.isNotEmpty()) {
-                mirrors.forEach { mirror ->
-                    val url = mirror.embedUrl.takeIf { it.isNotBlank() } ?: return@forEach
-                    callback(newExtractorLink(
-                        mirror.serverName.ifBlank { name }, mirror.serverName.ifBlank { name }, url,
+            mirrors.forEach { mirror ->
+                val url = mirror.embedUrl.takeIf { it.isNotBlank() } ?: return@forEach
+                callback(
+                    newExtractorLink(
+                        mirror.serverName.ifBlank { name },
+                        mirror.serverName.ifBlank { name },
+                        url,
                         if (url.contains(".m3u8", true)) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
                     ) {
                         this.referer = data
                         this.quality = parseQuality(mirror.quality)
-                    })
-                }
-                return true
+                    }
+                )
+                emitted = true
             }
+            if (emitted) return true
         }
 
-        val doc = app.get(data, headers = headers + ("Referer" to mainUrl)).document
         val embedUrls = linkedSetOf<String>()
-        doc.select("iframe[src]").forEach { iframe ->
-            val src = iframe.attr("abs:src").ifBlank { iframe.attr("src") }
+        episodeDoc?.select("iframe[src], iframe[data-src]")?.forEach { iframe ->
+            val src = iframe.attr("abs:src").ifBlank { iframe.attr("abs:data-src") }
+                .ifBlank { iframe.attr("src") }.ifBlank { iframe.attr("data-src") }
             if (src.startsWith("http")) embedUrls.add(src)
         }
-        doc.select("a[href]").forEach { a ->
+        episodeDoc?.select("a[href]")?.forEach { a ->
             val href = a.attr("abs:href").ifBlank { a.attr("href") }
-            if (href.startsWith("http") && (href.contains("embed", true) || href.contains("player", true))) {
-                embedUrls.add(href)
-            }
+            if (isLikelyEmbedUrl(href)) embedUrls.add(href)
         }
+        extractEmbedUrlsFromText(episodePage).forEach { embedUrls.add(it) }
+        extractEmbedUrlsFromText(episodeRsc).forEach { embedUrls.add(it) }
+
         embedUrls.forEach { embed ->
-            loadExtractor(embed, data, subtitleCallback, callback)
+            runCatching { loadExtractor(embed, data, subtitleCallback, callback) }
+                .onSuccess { emitted = true }
         }
-        return embedUrls.isNotEmpty()
+        return emitted
     }
 
-    private fun findTvSeriesJsonLd(doc: Document): JSONObject? {
+    private fun findEpisodeIdInText(text: String, slug: String): String? {
+        if (text.isBlank() || slug.isBlank()) return null
+        val unescaped = text.replace("\\\"", "\"")
+        val escapedSlug = Regex.escape(slug)
+        val patterns = listOf(
+            Regex(""""id"\s*:\s*(\d+)\s*,\s*"slug"\s*:\s*"$escapedSlug""""),
+            Regex(""""slug"\s*:\s*"$escapedSlug"\s*,\s*"id"\s*:\s*(\d+)"""),
+            Regex(""""id"\s*:\s*(\d+)[^}]{0,200}?"slug"\s*:\s*"$escapedSlug""""),
+            Regex(""""slug"\s*:\s*"$escapedSlug"[^}]{0,200}?"id"\s*:\s*(\d+)""")
+        )
+        for (p in patterns) {
+            p.find(unescaped)?.groupValues?.getOrNull(1)?.let { return it }
+        }
+        extractEpisodesFromText(text).firstOrNull { episodeKey(it.url) == slug }?.id?.let { return it.toString() }
+        return null
+    }
+
+    private fun extractEmbedUrlsFromText(text: String): List<String> {
+        if (text.isBlank()) return emptyList()
+        val urls = linkedSetOf<String>()
+        val normalized = text.replace("\\/", "/").replace("\\\"", "\"")
+        Regex("""https?://[^\s"'<>\\]+""").findAll(normalized).forEach { m ->
+            val u = m.value.trim().trimEnd(',', ')', ']', '}', ';')
+            if (isLikelyEmbedUrl(u)) urls.add(u)
+        }
+        return urls.toList()
+    }
+
+    private fun isLikelyEmbedUrl(url: String): Boolean {
+        if (!url.startsWith("http")) return false
+        val u = url.lowercase()
+        if (u.contains("x6.sokuja.uk") || u.contains("gbr.sokuja.uk") || u.contains("storages.sokuja.uk")) return false
+        if (u.contains("google-analytics") || u.contains("googletagmanager") || u.contains("histats") || u.contains("facebook") || u.contains("twitter")) return false
+        val keywords = listOf(
+            "embed", "player", "/e/", "/v/", "stream", "m3u8", ".mp4", ".mkv", "video",
+            "nontonanime", "desustream", "blogger", "kraken", "filemoon", "dood", "streamtape",
+            "mp4upload", "ok.ru", "mega", "yourupload", "vidhide", "wish", "luluvdo"
+        )
+        return keywords.any { u.contains(it) }
+    }
+
+    private fun findJsonLd(doc: Document, type: String): JSONObject? {
         doc.select("script[type=application/ld+json]").forEach { script ->
             val raw = script.data().trim()
             if (raw.isBlank()) return@forEach
             runCatching {
                 val obj = JSONObject(raw)
-                val type = obj.optString("@type")
-                if (type == "TVSeries" || type == "Movie") return obj
+                if (obj.optString("@type") == type) return obj
             }
         }
         return null
@@ -389,25 +533,24 @@ class SokujaProvider : MainAPI() {
     }
 
     private fun parseQuality(q: String?): Int = when {
-        q == null                               -> Qualities.Unknown.value
+        q == null -> Qualities.Unknown.value
         q.contains("2160") || q.contains("4K") -> Qualities.P2160.value
-        q.contains("1080")                      -> Qualities.P1080.value
-        q.contains("720")                       -> Qualities.P720.value
-        q.contains("480")                       -> Qualities.P480.value
-        q.contains("360")                       -> Qualities.P360.value
-        else -> Regex("""(\d{3,4})""").find(q)?.groupValues?.get(1)?.toIntOrNull()
-            ?: Qualities.Unknown.value
+        q.contains("1080") -> Qualities.P1080.value
+        q.contains("720") -> Qualities.P720.value
+        q.contains("480") -> Qualities.P480.value
+        q.contains("360") -> Qualities.P360.value
+        else -> Regex("""(\d{3,4})""").find(q)?.groupValues?.get(1)?.toIntOrNull() ?: Qualities.Unknown.value
     }
 
     private fun getType(t: String): TvType = when {
         t.contains("OVA", true) || t.contains("Special", true) -> TvType.OVA
-        t.contains("Movie", true)                              -> TvType.AnimeMovie
-        else                                                   -> TvType.Anime
+        t.contains("Movie", true) -> TvType.AnimeMovie
+        else -> TvType.Anime
     }
 
     private fun getStatus(t: String): ShowStatus = when {
         t.contains("Completed", true) || t.contains("Tamat", true) -> ShowStatus.Completed
-        else                                                         -> ShowStatus.Ongoing
+        else -> ShowStatus.Ongoing
     }
 
     private data class AniZipMeta(val data: AniZipData, val tmdbId: Int?, val kitsuId: String?)
@@ -418,8 +561,8 @@ class SokujaProvider : MainAPI() {
             val json = app.get("https://api.ani.zip/mappings?mal_id=$malId").text
             val tree = mapper.readTree(json)
             AniZipMeta(
-                data    = mapper.readValue(json, AniZipData::class.java),
-                tmdbId  = tree?.get("mappings")?.get("themoviedb_id")?.asInt()?.takeIf { it != 0 },
+                data = mapper.readValue(json, AniZipData::class.java),
+                tmdbId = tree?.get("mappings")?.get("themoviedb_id")?.asInt()?.takeIf { it != 0 },
                 kitsuId = tree?.get("mappings")?.get("kitsu_id")?.asText()?.takeIf { it.isNotBlank() }
             )
         }.getOrNull()
@@ -469,11 +612,11 @@ class SokujaProvider : MainAPI() {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class VideoMirror(
-        @JsonProperty("id")         val id: Int?,
+        @JsonProperty("id") val id: Int? = null,
         @JsonProperty("serverName") val serverName: String = "",
-        @JsonProperty("embedUrl")   val embedUrl: String = "",
-        @JsonProperty("embedType")  val embedType: String? = null,
-        @JsonProperty("quality")    val quality: String? = null
+        @JsonProperty("embedUrl") val embedUrl: String = "",
+        @JsonProperty("embedType") val embedType: String? = null,
+        @JsonProperty("quality") val quality: String? = null
     )
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -484,23 +627,23 @@ class SokujaProvider : MainAPI() {
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class AniZipImage(
         @JsonProperty("coverType") val coverType: String?,
-        @JsonProperty("url")       val url: String?
+        @JsonProperty("url") val url: String?
     )
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class AniZipEpisode(
         @JsonProperty("airDateUtc") val airDateUtc: String?,
-        @JsonProperty("runtime")    val runtime: Int?,
-        @JsonProperty("image")      val image: String?,
-        @JsonProperty("title")      val title: Map<String, String>?,
-        @JsonProperty("overview")   val overview: String?,
+        @JsonProperty("runtime") val runtime: Int?,
+        @JsonProperty("image") val image: String?,
+        @JsonProperty("title") val title: Map<String, String>?,
+        @JsonProperty("overview") val overview: String?,
     )
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class AniZipData(
-        @JsonProperty("titles")      val titles: Map<String, String>?,
+        @JsonProperty("titles") val titles: Map<String, String>?,
         @JsonProperty("description") val description: String?,
-        @JsonProperty("images")      val images: List<AniZipImage>?,
-        @JsonProperty("episodes")    val episodes: Map<String, AniZipEpisode>?,
+        @JsonProperty("images") val images: List<AniZipImage>?,
+        @JsonProperty("episodes") val episodes: Map<String, AniZipEpisode>?,
     )
 }
