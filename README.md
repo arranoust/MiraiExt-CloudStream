@@ -9,13 +9,11 @@
 
 ## 📝 Daftar Ekstensi
 
-| Nama Ekstensi | Bahasa     | Status |
-|---------------|------------|--------|
-| Animasu       | Indonesia  | ✅ Aktif |
-| Kuronime      | Indonesia  | ✅ Aktif |
-| OtakuDesu     | Indonesia  | ✅ Aktif |
-| Sokuja        | Indonesia  | ✅ Aktif |
-| Samehadaku    | Indonesia  | ✅ Aktif |
+| Nama Ekstensi | Bahasa    | Status   |
+|---------------|-----------|----------|
+| Otakudesu     | Indonesia | ✅ Aktif |
+| Samehadaku    | Indonesia | ✅ Aktif |
+| Sokuja        | Indonesia | ✅ Aktif |
 
 ---
 
