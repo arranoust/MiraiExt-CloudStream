@@ -1,4 +1,4 @@
-package com.otakudesu
+﻿package com.otakudesu
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
@@ -24,8 +24,9 @@ class OtakudesuProvider : MainAPI() {
     companion object {
         var context: android.content.Context? = null
 
+        private const val UA        = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         private val mapper          = ObjectMapper()
-        private val episodeNumRegex = Regex("""Episode\s?(\d+)""", RegexOption.IGNORE_CASE)
+        private val episodeNumRegex = Regex("""Episode\s*(\d+(?:\.\d+)?)""", RegexOption.IGNORE_CASE)
         private val yearRegex       = Regex("""\b(19|20)\d{2}\b""")
 
         fun getType(t: String): TvType = when {
@@ -39,8 +40,6 @@ class OtakudesuProvider : MainAPI() {
             else                                                         -> ShowStatus.Ongoing
         }
     }
-
-    // ================== Homepage ==================
 
     override val mainPage = mainPageOf(
         "$mainUrl/ongoing-anime/page/"  to "Ongoing Anime",
@@ -56,10 +55,10 @@ class OtakudesuProvider : MainAPI() {
     }
 
     private fun Element.toSearchResult(): AnimeSearchResponse? {
-        val title     = selectFirst("h2.jdlflm")?.text()?.trim() ?: return null
-        val href      = selectFirst("a")?.attr("href") ?: return null
+        val title = selectFirst("h2.jdlflm")?.text()?.trim() ?: return null
+        val href = selectFirst("a")?.attr("href") ?: return null
         val posterUrl = selectFirst("div.thumbz > img")?.attr("src")
-        val epNum     = selectFirst("div.epz")?.ownText()
+        val epNum = selectFirst("div.epz")?.ownText()
             ?.replace(Regex("\\D"), "")?.trim()?.toIntOrNull()
         return newAnimeSearchResponse(title, href, TvType.Anime) {
             this.posterUrl = posterUrl
@@ -67,75 +66,66 @@ class OtakudesuProvider : MainAPI() {
         }
     }
 
-    // ================== Search ==================
-
-    // fix #5: null-safe search results
     override suspend fun search(query: String): List<SearchResponse> {
         return app.get("$mainUrl/?s=$query&post_type=anime").document
             .select("ul.chivsrc > li")
             .mapNotNull {
-                val title     = it.selectFirst("h2 > a")?.ownText()?.trim() ?: return@mapNotNull null
-                val href      = it.selectFirst("h2 > a")?.attr("href") ?: return@mapNotNull null
+                val title = it.selectFirst("h2 > a")?.ownText()?.trim() ?: return@mapNotNull null
+                val href = it.selectFirst("h2 > a")?.attr("href") ?: return@mapNotNull null
                 val posterUrl = it.selectFirst("img")?.attr("src")
                 newAnimeSearchResponse(title, href, TvType.Anime) { this.posterUrl = posterUrl }
             }
     }
 
-    // ================== Load ==================
-
     override suspend fun load(url: String): LoadResponse? {
         val doc = app.get(url).document
 
-        val title     = doc.selectFirst("div.infozingle > p:nth-child(1) > span")
+        val title = doc.selectFirst("div.infozingle > p:nth-child(1) > span")
             ?.ownText()?.replace(":", "")?.trim() ?: return null
-        val poster    = doc.selectFirst("div.fotoanime > img")?.attr("src")
-        val synopsis  = doc.select("div.sinopc > p").text()
-        val tags      = doc.select("div.infozingle > p:nth-child(11) > span > a").map { it.text() }
-        val type      = getType(
+        val poster = doc.selectFirst("div.fotoanime > img")?.attr("src")
+        val synopsis = doc.select("div.sinopc > p").text()
+        val tags = doc.select("div.infozingle > p:nth-child(11) > span > a").map { it.text() }
+        val type = getType(
             doc.selectFirst("div.infozingle > p:nth-child(5) > span")
                 ?.ownText()?.replace(":", "")?.trim() ?: "tv"
         )
         val statusStr = doc.selectFirst("div.infozingle > p:nth-child(6) > span")
             ?.ownText()?.replace(":", "")?.trim() ?: ""
-        val year      = yearRegex.find(
+        val year = yearRegex.find(
             doc.select("div.infozingle > p:nth-child(9) > span").text()
         )?.groupValues?.get(1)?.toIntOrNull()
-        val trailer   = doc.selectFirst("div.trailer-anime iframe, #trailer iframe")?.attr("src")
+        val trailer = doc.selectFirst("div.trailer-anime iframe, #trailer iframe")?.attr("src")
 
         val tracker = APIHolder.getTracker(listOf(title), TrackerType.getTypes(type), year, true)
-        val meta    = fetchAniZipMeta(tracker?.malId)
+        val meta = fetchAniZipMeta(tracker?.malId)
         val logoUrl = fetchTmdbLogoUrl(type, meta?.tmdbId, "en")
 
         val backgroundPoster = meta?.data?.images?.find { it.coverType == "Fanart" }?.url
             ?: tracker?.cover
 
-        val episodeListEl = doc.select("div.episodelist").getOrNull(1)
-        val episodes = episodeListEl?.select("ul > li")?.amap { el ->
-            val epName = el.selectFirst("a")?.text() ?: return@amap null
-            var epNum  = episodeNumRegex.find(epName)?.groupValues?.getOrNull(1)?.toIntOrNull()
-            val link   = fixUrl(el.selectFirst("a")?.attr("href") ?: return@amap null)
-
+        val aniEpisodes = meta?.data?.episodes ?: emptyMap()
+        val episodeElements = doc.select("div.episodelist").getOrNull(1)?.select("ul > li") ?: emptyList()
+        val episodes = episodeElements.mapIndexedNotNull { index, el ->
+            val epName = el.selectFirst("a")?.text()?.trim() ?: return@mapIndexedNotNull null
+            val link = fixUrl(el.selectFirst("a")?.attr("href") ?: return@mapIndexedNotNull null)
+            var epNum = episodeNumRegex.find(epName)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.toInt()
             if (type == TvType.AnimeMovie && epNum == null) epNum = 1
-            val aniEp = epNum?.let { meta?.data?.episodes?.get(it.toString()) }
+            val aniEp = matchAniEpisode(epNum, epName, index, aniEpisodes)
 
             newEpisode(link) {
-                this.name = if (type == TvType.AnimeMovie) {
-                    meta?.data?.titles?.get("en") ?: meta?.data?.titles?.get("ja") ?: title
-                } else {
-                    aniEp?.title?.get("en") ?: aniEp?.title?.get("ja") ?: epName
-                }
-                this.episode     = epNum
-                this.posterUrl   = aniEp?.image ?: meta?.data?.images?.firstOrNull()?.url ?: ""
-                this.description = aniEp?.overview?.takeIf { it.isNotBlank() }
+                this.name = if (type == TvType.AnimeMovie) title else epName
+                this.episode = epNum ?: aniEp?.key?.toIntOrNull()
+                this.posterUrl = aniEp?.value?.image ?: meta?.data?.images?.firstOrNull()?.url ?: ""
+                this.description = aniEp?.value?.overview?.takeIf { it.isNotBlank() }
                     ?: "Synopsis not yet available."
-                this.runTime     = aniEp?.runtime
-                this.addDate(aniEp?.airDateUtc)
+                this.runTime = aniEp?.value?.runtime
+                this.addDate(aniEp?.value?.airDateUtc)
             }
-        }?.filterNotNull()?.reversed() ?: emptyList()
+        }.reversed()
 
         val recommendations = doc.select("div.isi-recommend-anime-series > div.isi-konten").mapNotNull {
-            val recName   = it.selectFirst("span.judul-anime > a")?.text() ?: return@mapNotNull null
-            val recHref   = it.selectFirst("a")?.attr("href") ?: return@mapNotNull null
+            val recName = it.selectFirst("span.judul-anime > a")?.text() ?: return@mapNotNull null
+            val recHref = it.selectFirst("a")?.attr("href") ?: return@mapNotNull null
             val recPoster = it.selectFirst("a > img")?.attr("src")
             newAnimeSearchResponse(recName, recHref, TvType.Anime) { this.posterUrl = recPoster }
         }
@@ -144,18 +134,18 @@ class OtakudesuProvider : MainAPI() {
             ?: meta?.data?.episodes?.get("1")?.overview?.takeIf { it.isNotBlank() }
             ?: synopsis
 
-        return newAnimeLoadResponse(title, url, TvType.Anime) {
-            this.engName             = meta?.data?.titles?.get("en") ?: title
-            this.japName             = meta?.data?.titles?.get("ja") ?: meta?.data?.titles?.get("x-jat")
-            this.posterUrl           = tracker?.image ?: poster
+        return newAnimeLoadResponse(title, url, type) {
+            this.engName = meta?.data?.titles?.get("en") ?: title
+            this.japName = meta?.data?.titles?.get("ja") ?: meta?.data?.titles?.get("x-jat")
+            this.posterUrl = tracker?.image ?: poster
             this.backgroundPosterUrl = backgroundPoster
             runCatching { this.logoUrl = logoUrl }
-            this.year                = year
+            this.year = year
             addEpisodes(DubStatus.Subbed, episodes)
-            this.showStatus          = getStatus(statusStr)
-            this.plot                = finalPlot
-            this.tags                = tags
-            this.recommendations     = recommendations
+            this.showStatus = getStatus(statusStr)
+            this.plot = finalPlot
+            this.tags = tags
+            this.recommendations = recommendations
             addTrailer(trailer)
             addMalId(tracker?.malId)
             addAniListId(tracker?.aniId?.toIntOrNull())
@@ -163,7 +153,22 @@ class OtakudesuProvider : MainAPI() {
         }
     }
 
-    // ================== Load Links ==================
+    private fun matchAniEpisode(
+        epNum: Int?,
+        name: String?,
+        index: Int,
+        episodes: Map<String, AniZipEpisode>
+    ): Map.Entry<String, AniZipEpisode>? {
+        if (episodes.isEmpty()) return null
+        epNum?.toString()?.let { key -> episodes[key]?.let { return java.util.AbstractMap.SimpleEntry(key, it) } }
+        name?.let { n ->
+            episodes.entries.firstOrNull { (_, v) -> v.title?.values?.any { it.equals(n, true) } == true }?.let { return it }
+        }
+        val byOrder = episodes.entries.sortedBy { it.key.toIntOrNull() ?: Int.MAX_VALUE }
+        return byOrder.getOrNull(index)
+    }
+
+
 
     override suspend fun loadLinks(
         data: String,
@@ -206,7 +211,7 @@ class OtakudesuProvider : MainAPI() {
         return true
     }
 
-    // ================== Helpers ==================
+
 
     private fun ajaxHeaders(referer: String) = mapOf(
         "Content-Type"     to "application/x-www-form-urlencoded",
@@ -290,7 +295,7 @@ class OtakudesuProvider : MainAPI() {
         }
     }
 
-    // ================== Metadata Fetchers ==================
+
 
     private data class AniZipMeta(
         val data: AniZipData,
@@ -352,7 +357,7 @@ class OtakudesuProvider : MainAPI() {
         return best?.let { urlOf(it) } ?: bestSvg?.let { urlOf(it) }
     }
 
-    // ================== Data Classes ==================
+
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class AniZipImage(
