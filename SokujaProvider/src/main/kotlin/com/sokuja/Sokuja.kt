@@ -139,8 +139,9 @@ class SokujaProvider : MainAPI() {
             ?: doc.selectFirst("meta[name=description]")?.attr("content")?.trim()?.takeIf { it.isNotBlank() }
             ?: ""
 
+        val posterEl: Element? = doc.selectFirst("img.object-cover, .thumb img, div[class*=poster] img, meta[property=og:image]")
         val poster = tracker?.image
-            ?: doc.selectFirst("img.object-cover, .thumb img, div[class*=poster] img, meta[property=og:image]")?.let { el ->
+            ?: posterEl?.let { el: Element ->
                 if (el.tagName() == "meta") el.attr("content").takeIf { it.isNotBlank() }?.let(::fixUrlNull)
                 else el.extractNextImageUrl()
             }
